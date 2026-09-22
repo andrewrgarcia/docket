@@ -1,0 +1,47 @@
+[package]
+name = "docket-cli"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+
+description = "Every project and idea you have, in one list, ready to paste into any AI. Plain markdown, no database, no daemon."
+license = "MIT"
+repository = "https://github.com/andrewrgarcia/docket"
+homepage = "https://github.com/andrewrgarcia/docket"
+documentation = "https://github.com/andrewrgarcia/docket"
+readme = "README.md"
+authors = ["Andrew R. Garcia"]
+
+keywords = ["cli", "notes", "projects", "markdown", "llm"]
+categories = ["command-line-utilities", "development-tools"]
+
+include = [
+    "src/**/*.rs",
+    "Cargo.toml",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE",
+]
+
+[dependencies]
+dirs = "6.0"
+crossterm = "0.28"
+
+[[bin]]
+name = "dk"
+path = "src/main.rs"
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true
+# No `panic = "abort"`: the editor restores the terminal in a Drop, and an
+# aborting panic would skip it and leave the shell in raw mode.

@@ -1,0 +1,39 @@
+mod add;
+mod edit;
+mod list;
+mod open;
+mod out;
+mod remove;
+mod rename;
+mod show;
+mod sync;
+
+use crate::cli::{Command, HELP};
+use crate::error::Result;
+use crate::store::Store;
+
+/// One place where a verb becomes an effect. Each command opens the store
+/// itself, so `help` and `version` never depend on one.
+pub fn dispatch(command: Command) -> Result<()> {
+    match command {
+        Command::Help => {
+            print!("{HELP}");
+            Ok(())
+        }
+        Command::Version => {
+            println!("dk {}", env!("CARGO_PKG_VERSION"));
+            Ok(())
+        }
+        Command::List => list::run(&Store::open()?),
+        Command::Show(name) => show::run(&Store::open()?, &name),
+        Command::Edit(name) => edit::run(&Store::open()?, &name),
+        Command::Open(Some(name)) => open::card(&Store::open()?, &name),
+        Command::Open(None) => open::store_dir(&Store::open()?),
+        Command::Add(path) => add::run(&Store::open()?, path.as_deref()),
+        Command::Sync(name) => sync::run(&Store::open()?, name.as_deref()),
+        Command::Pick { out } => out::picked(&Store::open()?, out.as_deref()),
+        Command::Out { out } => out::all(&Store::open()?, out.as_deref()),
+        Command::Rename { from, to } => rename::run(&Store::open()?, &from, &to),
+        Command::Remove(name) => remove::run(&Store::open()?, &name),
+    }
+}

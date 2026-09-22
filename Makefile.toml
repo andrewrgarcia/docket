@@ -1,0 +1,30 @@
+# cargo-make. Cross-platform on purpose: no GNU make, no shell scripts.
+[config]
+default_to_workspace = false
+
+[tasks.check]
+command = "cargo"
+args = ["clippy", "--all-targets", "--", "-D", "warnings"]
+
+[tasks.fmt]
+command = "cargo"
+args = ["fmt", "--all"]
+
+[tasks.test]
+command = "cargo"
+args = ["test", "--all-targets"]
+
+[tasks.build]
+command = "cargo"
+args = ["build", "--release"]
+
+[tasks.ci]
+dependencies = ["fmt", "check", "test", "build"]
+
+[tasks.install]
+command = "cargo"
+args = ["install", "--path", ".", "--locked"]
+
+[tasks.publish-dry]
+command = "cargo"
+args = ["publish", "--dry-run", "--locked"]

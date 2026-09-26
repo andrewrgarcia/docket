@@ -10,10 +10,15 @@ follow [Semantic Versioning].
 First release. The binary is `dk`.
 
 ### Added
-- `dk` — the list: hash, name, status, age, progress, and one line of
+- `dk` — the list: hash, name, status, age, a completion bar, and one line of
   description, coloured and clipped to the terminal width. Age is days since
   the project's last git activity (or the card's last edit); docket's own
   rewrites preserve it.
+- `dk pick` (aliases `dk p`, `dk tree`, `dk t`) — the store as a fold-out
+  tree, selectable at card *or* section level, README included. Mouse
+  support, per-row token cost with heat colouring, per-card completion,
+  `t` to tick a checkbox straight into the card, `e` to edit and return,
+  `N`/`X`/`R` to take one section across every card.
 - Checkboxes: `[ ]` / `[x]` lines in a card's own sections are recognised,
   tallied in the list, coloured in the editor, and ticked with Space in the
   editor's command mode. Tab and Shift-Tab jump between them.
@@ -35,8 +40,6 @@ First release. The binary is `dk`.
   Windows: `e` to type, `:w` `:q` `:q!` `:wq` to act, colour by line kind,
   soft wrap, grouped undo, line cut and paste, bracketed paste, atomic saves.
   `DOCKET_EDITOR`, `VISUAL` or `EDITOR` selects an external editor instead.
-- `dk pick` — tick cards in a full-screen list with a live token estimate,
-  then write the file.
 - `dk out` — write every card to the same file.
 - `--out <file>` — write somewhere other than `DOCKET.md`.
 - `dk rename <old> <new>` — rename a card and its heading together.

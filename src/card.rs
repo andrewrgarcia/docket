@@ -134,6 +134,65 @@ impl Card {
         self.body.chars().count() / 4
     }
 
+    /// Everything above the first `##` heading: the title and the field
+    /// lines. Written out with any selection, because a section with no card
+    /// around it is unreadable.
+    pub fn header(&self) -> String {
+        self.body
+            .lines()
+            .take_while(|l| !l.trim_start().starts_with("## "))
+            .collect::<Vec<_>>()
+            .join("\n")
+            .trim_end()
+            .to_string()
+    }
+
+    /// Every `##` section including the README, for the picker. `sections`
+    /// stops at the README because completion is about what *you* wrote;
+    /// choosing what to send is a different question.
+    pub fn all_sections(&self) -> Vec<(String, Vec<String>)> {
+        let mut out: Vec<(String, Vec<String>)> = Vec::new();
+        for line in self.body.lines() {
+            let trimmed = line.trim_end();
+            if trimmed.starts_with("## ") {
+                out.push((trimmed.to_string(), Vec::new()));
+            } else if let Some((_, lines)) = out.last_mut() {
+                lines.push(line.to_string());
+            }
+        }
+        out
+    }
+
+    /// The card's own `##` sections, in order, as `(heading, body lines)`.
+    /// The README is not one of them: it is the project's text, not yours.
+    pub fn sections(&self) -> Vec<(String, Vec<String>)> {
+        let mut out: Vec<(String, Vec<String>)> = Vec::new();
+        for line in self.body.lines() {
+            let trimmed = line.trim_end();
+            if trimmed.starts_with("## ") {
+                if trimmed.eq_ignore_ascii_case(README_HEADING) {
+                    break;
+                }
+                out.push((trimmed.to_string(), Vec::new()));
+            } else if let Some((_, lines)) = out.last_mut() {
+                lines.push(line.to_string());
+            }
+        }
+        out
+    }
+
+    /// `(filled, total)` sections. A section counts as filled when it holds
+    /// anything but blank lines — the question a card answers is "have I
+    /// written this down yet", and an empty `## next` means no.
+    pub fn completion(&self) -> (usize, usize) {
+        let sections = self.sections();
+        let filled = sections
+            .iter()
+            .filter(|(_, lines)| lines.iter().any(|l| !l.trim().is_empty()))
+            .count();
+        (filled, sections.len())
+    }
+
     /// `(done, total)` checkboxes in the hand-written sections. The README is
     /// excluded: a project's own checklist is not yours.
     pub fn progress(&self) -> (usize, usize) {
@@ -146,12 +205,6 @@ impl Card {
         crate::checkbox::tally(&own)
     }
 
-    /// True when the card carries a README.
-    pub fn has_readme(&self) -> bool {
-        self.body
-            .lines()
-            .any(|l| l.trim_end().eq_ignore_ascii_case(README_HEADING))
-    }
 
     /// The starting text of a new card. The README goes last, under its own
     /// heading, because a card is read top-down and the hand-written notes are
@@ -271,14 +324,9 @@ mod tests {
     fn a_project_without_a_readme_gets_no_readme_section() {
         let card = Card::template("a43b21c0", "moxi", Status::Idea, "x", "", "", "");
         assert!(!card.contains(README_HEADING));
-        assert!(!Card::parse("moxi", &card, 0).has_readme());
+        assert!(Card::parse("moxi", &card, 0).sections().iter().all(|(h, _)| h != README_HEADING));
     }
 
-    #[test]
-    fn has_readme_sees_the_section() {
-        let card = Card::template("a43b21c0", "moxi", Status::Active, "x", "/p", "", "hello");
-        assert!(Card::parse("moxi", &card, 0).has_readme());
-    }
 
     #[test]
     fn with_readme_replaces_only_the_readme_section() {
@@ -308,6 +356,41 @@ mod tests {
         let updated = card.with_readme("");
         assert!(!updated.contains(README_HEADING));
         assert!(updated.contains("## now\nx"));
+    }
+
+    #[test]
+    fn sections_stop_at_the_readme() {
+        let c = Card::parse(
+            "x",
+            "# x\nid: a\n\n## now\nparser\n\n## next\n\n## readme\n## their heading\n",
+            0,
+        );
+        let headings: Vec<String> = c.sections().into_iter().map(|(h, _)| h).collect();
+        assert_eq!(headings, vec!["## now", "## next"]);
+    }
+
+    #[test]
+    fn all_sections_includes_the_readme_and_header_stops_before_it() {
+        let c = Card::parse(
+            "x",
+            "# x\nid: a\nstatus: active\n\n## now\nparser\n\n## readme\ntheirs\n",
+            0,
+        );
+        let all: Vec<String> = c.all_sections().into_iter().map(|(h, _)| h).collect();
+        assert_eq!(all, vec!["## now", "## readme"]);
+        assert_eq!(c.sections().len(), 1, "completion ignores the readme");
+        assert_eq!(c.header(), "# x\nid: a\nstatus: active");
+    }
+
+    #[test]
+    fn completion_counts_sections_with_something_in_them() {
+        let c = Card::parse(
+            "x",
+            "# x\nid: a\n\n## now\nparser\n\n## next\n\n## open questions\n   \n\n## notes\nmine\n",
+            0,
+        );
+        assert_eq!(c.completion(), (2, 4));
+        assert_eq!(Card::parse("y", "# y\nid: b\n", 0).completion(), (0, 0));
     }
 
     #[test]

@@ -12,6 +12,10 @@ use crate::cli::{Command, HELP};
 use crate::error::Result;
 use crate::store::Store;
 
+/// The editor, reachable from the picker without going through the
+/// command table.
+pub use edit::run as edit_card;
+
 /// One place where a verb becomes an effect. Each command opens the store
 /// itself, so `help` and `version` never depend on one.
 pub fn dispatch(command: Command) -> Result<()> {

@@ -34,7 +34,7 @@ impl Sandbox {
 
     fn run_with_stdin(&self, args: &[&str], stdin: &str) -> Output {
         use std::io::Write;
-        let mut child = Command::new(env!("CARGO_BIN_EXE_dkt"))
+        let mut child = Command::new(env!("CARGO_BIN_EXE_dk"))
             .args(args)
             .current_dir(&self.scratch)
             .env("DOCKET_HOME", &self.home)
@@ -167,11 +167,22 @@ fn sync_skips_ideas_and_vanished_paths() {
 #[test]
 fn show_prints_the_card_verbatim_when_piped() {
     let s = Sandbox::new();
-    let body = "# moxi\nstatus: active\nwhat: a language\n\n## now\nparser\n";
+    // With an id already present, nothing is backfilled and the file that
+    // comes back out is byte-for-byte the file that went in.
+    let body = "# moxi\nid: a43b21c0\nstatus: active\nwhat: a language\n\n## now\nparser\n";
     s.card("moxi", body);
     assert_eq!(s.stdout(&["show", "moxi"]), body);
     // A bare name is the same thing.
     assert_eq!(s.stdout(&["moxi"]), body);
+}
+
+#[test]
+fn show_includes_an_id_the_store_had_to_backfill() {
+    let s = Sandbox::new();
+    s.card("moxi", "# moxi\nstatus: active\n");
+    let shown = s.stdout(&["show", "moxi"]);
+    assert!(shown.contains("id: "), "{shown}");
+    assert_eq!(shown, s.read("moxi"), "show matches the file on disk");
 }
 
 #[test]
@@ -200,7 +211,7 @@ fn out_honours_a_chosen_filename() {
 }
 
 #[test]
-fn pick_needs_a_terminal_and_says_what_to_use_instead() {
+fn pick_points_at_the_non_interactive_route() {
     let s = Sandbox::new();
     s.card("moxi", "# moxi\nstatus: active\n");
     let out = s.run(&["pick"]);
@@ -231,13 +242,29 @@ fn adding_the_same_directory_twice_is_refused() {
 }
 
 #[test]
-fn the_list_shows_progress_per_card() {
+fn the_list_shows_how_much_of_each_card_is_written() {
     let s = Sandbox::new();
-    s.card("moxi", "# moxi\nstatus: active\nwhat: x\n\n## now\n[ ] parser\n[x] lexer\n- [ ] tests\n");
+    s.card(
+        "moxi",
+        "# moxi\nstatus: active\nwhat: x\n\n## now\nparser\n\n## next\n\n## notes\n",
+    );
     s.card("kol", "# kol\nstatus: idea\nwhat: y\n");
     let listing = s.stdout(&[]);
-    assert!(listing.contains("PROGRESS"), "{listing}");
-    assert!(listing.contains("1/3"), "{listing}");
+    assert!(listing.contains("DONE"), "{listing}");
+    assert!(listing.contains("1/3"), "one of three sections written: {listing}");
+    assert!(listing.contains("—"), "a card with no sections shows a dash: {listing}");
+    assert!(!listing.contains("PROGRESS"), "the old column is gone");
+}
+
+#[test]
+fn pick_and_its_aliases_all_need_a_terminal() {
+    let s = Sandbox::new();
+    s.card("moxi", "# moxi\nstatus: active\n\n## now\nx\n");
+    for verb in ["pick", "p", "tree", "t"] {
+        let out = s.run(&[verb]);
+        assert!(!out.status.success(), "{verb} should refuse a pipe");
+        assert!(err(&out).contains("needs a terminal"), "{verb}: {}", err(&out));
+    }
 }
 
 #[test]
@@ -292,7 +319,7 @@ fn open_reports_when_no_desktop_opener_exists() {
     s.card("moxi", "# moxi\nstatus: active\n");
 
     // A opener that cannot be spawned stands in for a headless machine.
-    let out = Command::new(env!("CARGO_BIN_EXE_dkt"))
+    let out = Command::new(env!("CARGO_BIN_EXE_dk"))
         .args(["open", "moxi"])
         .current_dir(&s.scratch)
         .env("DOCKET_HOME", &s.home)
@@ -309,7 +336,7 @@ fn open_uses_the_configured_opener() {
     let s = Sandbox::new();
     s.card("moxi", "# moxi\nstatus: active\n");
     let opener = if cfg!(windows) { "cmd /c exit 0" } else { "true" };
-    let out = Command::new(env!("CARGO_BIN_EXE_dkt"))
+    let out = Command::new(env!("CARGO_BIN_EXE_dk"))
         .args(["open", "moxi"])
         .current_dir(&s.scratch)
         .env("DOCKET_HOME", &s.home)
@@ -392,7 +419,7 @@ fn a_configured_editor_is_used_instead() {
     let s = Sandbox::new();
     s.card("moxi", "# moxi\nstatus: active\n");
     let editor = if cfg!(windows) { "cmd /c exit 0" } else { "true" };
-    let out = Command::new(env!("CARGO_BIN_EXE_dkt"))
+    let out = Command::new(env!("CARGO_BIN_EXE_dk"))
         .args(["edit", "moxi"])
         .current_dir(&s.scratch)
         .env("DOCKET_HOME", &s.home)

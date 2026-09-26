@@ -3,7 +3,7 @@ use std::io::{self, Write};
 use crate::card::Card;
 use crate::editor::syntax::{self, Kind};
 use crate::error::{Error, Result};
-use crate::theme::{self, BOLD, CYAN, DIM, GREEN, RESET};
+use crate::theme::{self, BOLD, CYAN, DIM, GREEN};
 
 /// Widths outside this range mean a terminal that did not report honestly.
 const MIN_WIDTH: usize = 40;
@@ -20,14 +20,29 @@ fn terminal_width() -> usize {
         .unwrap_or(FALLBACK_WIDTH)
 }
 
-/// The list.
+/// The list, as it goes to the terminal.
 pub fn table(cards: &[Card]) -> String {
-    render_table(cards, terminal_width())
+    render_table(cards, terminal_width(), theme::enabled())
+}
+
+/// Colour, decided by the caller rather than read from the environment.
+///
+/// `theme::enabled()` asks whether stdout is a terminal, which is true inside
+/// `cargo test` — the harness captures each thread's output, but the process
+/// still owns the tty. Rendering would then emit escape codes that no width
+/// assertion can see past. Passing the decision in keeps the renderer honest
+/// and the tests deterministic.
+fn ink(on: bool, text: &str, codes: &[&str]) -> String {
+    if on {
+        theme::paint_always(text, codes)
+    } else {
+        text.to_string()
+    }
 }
 
 /// One row per card, clipped to `width`. Descriptions are routinely longer
 /// than a terminal is wide, and a table that wraps stops being a table.
-fn render_table(cards: &[Card], width: usize) -> String {
+fn render_table(cards: &[Card], width: usize, color: bool) -> String {
     if cards.is_empty() {
         return "no cards yet — `dk add .` in a project, or `dk add` for an idea\n".into();
     }
@@ -37,19 +52,11 @@ fn render_table(cards: &[Card], width: usize) -> String {
 
     let hash_w = shorts.iter().map(|s| s.len()).max().unwrap_or(4).max(4);
 
-    // The PROGRESS column appears only when some card has a checkbox; a column
-    // of blanks is noise.
-    let tallies: Vec<(usize, usize)> = cards.iter().map(Card::progress).collect();
-    let any_boxes = tallies.iter().any(|(_, total)| *total > 0);
-    let progress_cells: Vec<String> = tallies
-        .iter()
-        .map(|(done, total)| if *total == 0 { String::new() } else { format!("{done}/{total}") })
-        .collect();
-    let progress_w = if any_boxes {
-        progress_cells.iter().map(|c| c.len()).max().unwrap_or(5).max(5)
-    } else {
-        0
-    };
+    // How much of each card has actually been written. A card is a form you
+    // fill in over time, and this is the column that shames the empty ones.
+    let filled: Vec<(usize, usize)> = cards.iter().map(Card::completion).collect();
+    let any_sections = filled.iter().any(|(_, total)| *total > 0);
+    let done_w = "DONE".len().max(BAR + 4);
     let name_w = cards
         .iter()
         .map(|c| c.name.chars().count())
@@ -63,16 +70,17 @@ fn render_table(cards: &[Card], width: usize) -> String {
         .unwrap_or(6)
         .max(6);
 
-    // hash + name + status + age (+ progress), each followed by two spaces.
+    // hash + name + status + age (+ done), each followed by two spaces.
     let used = 2 + hash_w + 2 + name_w + 2 + status_w + 2 + 5 + 2
-        + if any_boxes { progress_w + 2 } else { 0 };
+        + if any_sections { done_w + 2 } else { 0 };
     let what_w = width.saturating_sub(used);
 
     let mut out = String::new();
-    let progress_head = if any_boxes { format!("{:>progress_w$}  ", "PROGRESS") } else { String::new() };
-    out.push_str(&theme::paint(
+    let done_head = if any_sections { format!("{:<done_w$}  ", "DONE") } else { String::new() };
+    out.push_str(&ink(
+        color,
         &format!(
-            "  {:<hash_w$}  {:<name_w$}  {:<status_w$}  {:>5}  {progress_head}{}",
+            "  {:<hash_w$}  {:<name_w$}  {:<status_w$}  {:>5}  {done_head}{}",
             "HASH",
             "NAME",
             "STATUS",
@@ -83,39 +91,42 @@ fn render_table(cards: &[Card], width: usize) -> String {
     ));
     out.push('\n');
 
-    for ((card, short), cell) in cards.iter().zip(&shorts).zip(&progress_cells) {
+    for ((card, short), (done, total)) in cards.iter().zip(&shorts).zip(&filled) {
         let cold = card.status.is_cold();
 
-        let hash = theme::paint(&pad(short, hash_w), &[DIM]);
-        let name = theme::paint(&pad(&card.name, name_w), if cold { &[DIM] } else { &[BOLD] });
-        let status = theme::paint(
+        let hash = ink(color, &pad(short, hash_w), &[DIM]);
+        let name = ink(color, &pad(&card.name, name_w), if cold { &[DIM] } else { &[BOLD] });
+        let status = ink(
+            color,
             &pad(card.status.as_str(), status_w),
             &[theme::status_color(card.status.as_str())],
         );
-        let age = theme::paint(&format!("{:>4}d", card.age_days), &[DIM]);
-        let progress = if any_boxes {
-            let (done, total) = card.progress();
-            let color = if total > 0 && done == total { GREEN } else { CYAN };
-            format!("{}  ", theme::paint(&format!("{cell:>progress_w$}"), &[color]))
+        let age = ink(color, &format!("{:>4}d", card.age_days), &[DIM]);
+        let done_cell = if any_sections {
+            format!("{}  ", completion_cell(*done, *total, done_w, color))
         } else {
             String::new()
         };
         let what = clip(&card.what, what_w);
-        let what = if cold { theme::paint(&what, &[DIM]) } else { what };
+        let what = if cold { ink(color, &what, &[DIM]) } else { what };
 
-        out.push_str(&format!("  {hash}  {name}  {status}  {age}  {progress}{what}"));
+        out.push_str(&format!("  {hash}  {name}  {status}  {age}  {done_cell}{what}"));
         out.push('\n');
     }
 
     out.push('\n');
-    out.push_str(&theme::paint(&format!("{} cards", cards.len()), &[DIM]));
+    out.push_str(&ink(color, &format!("{} cards", cards.len()), &[DIM]));
     out.push('\n');
     out
 }
 
 /// A card for reading: the same text, coloured by line kind.
 pub fn render_card(card: &Card) -> String {
-    if !theme::enabled() {
+    render_card_with(card, theme::enabled())
+}
+
+fn render_card_with(card: &Card, color: bool) -> String {
+    if !color {
         let mut body = card.body.clone();
         if !body.ends_with('\n') {
             body.push('\n');
@@ -128,7 +139,7 @@ pub fn render_card(card: &Card) -> String {
     for (line, kind) in lines.iter().zip(kinds) {
         match kind {
             Kind::Body => out.push_str(line),
-            other => out.push_str(&theme::paint(line, other.codes())),
+            other => out.push_str(&theme::paint_always(line, other.codes())),
         }
         out.push('\n');
     }
@@ -140,6 +151,23 @@ fn pad(text: &str, width: usize) -> String {
     let mut out = text.to_string();
     out.extend(std::iter::repeat(' ').take(width.saturating_sub(used)));
     out
+}
+
+/// Blocks in the completion bar.
+const BAR: usize = 4;
+
+/// `▰▰▱▱ 2/4` — full when every section has something in it, dim when the
+/// card has no sections at all.
+fn completion_cell(done: usize, total: usize, width: usize, color: bool) -> String {
+    if total == 0 {
+        return ink(color, &pad("—", width), &[DIM]);
+    }
+    let lit = (done * BAR).div_ceil(total.max(1)).min(BAR);
+    let bar: String = "▰".repeat(lit) + &"▱".repeat(BAR - lit);
+    let code = if done == total { GREEN } else { CYAN };
+    let text = format!("{bar} {done}/{total}");
+    let padding = width.saturating_sub(text.chars().count());
+    format!("{}{}", ink(color, &text, &[code]), " ".repeat(padding))
 }
 
 /// Cut to `width` characters, ending in an ellipsis when something was lost.
@@ -178,6 +206,13 @@ pub fn prompt(message: &str) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::theme::RESET;
+
+    /// Render with colour off — the assertions below measure widths and
+    /// prefixes, which escape codes would make meaningless.
+    fn plain(cards: &[Card], width: usize) -> String {
+        render_table(cards, width, false)
+    }
 
     fn card(name: &str, status: &str, what: &str) -> Card {
         // A distinct id per name, so short ids stay four characters.
@@ -196,10 +231,9 @@ mod tests {
         })
     }
 
-    /// Colour is off in tests (no terminal), so widths are measurable.
     #[test]
     fn empty_store_explains_the_next_step() {
-        assert!(render_table(&[], 80).contains("dk add"));
+        assert!(plain(&[], 80).contains("dk add"));
     }
 
     #[test]
@@ -207,7 +241,7 @@ mod tests {
         let long = "Turn your AI chats into a durable, local-first diary. Save messages, attach notes, organize conversations.";
         let cards = [card("cli", "active", long), card("yggdrasil-cli", "active", long)];
         for width in [40usize, 60, 80, 120] {
-            for line in render_table(&cards, width).lines() {
+            for line in plain(&cards, width).lines() {
                 assert!(
                     line.chars().count() <= width,
                     "width {width}: {} chars in {line:?}",
@@ -220,28 +254,40 @@ mod tests {
     #[test]
     fn clipped_descriptions_end_in_an_ellipsis() {
         let cards = [card("a", "active", "a description far longer than the space here")];
-        assert!(render_table(&cards, 40).contains('…'));
+        assert!(plain(&cards, 40).contains('…'));
     }
 
     #[test]
-    fn the_progress_column_appears_only_when_a_card_has_boxes() {
-        let plain = [card("a", "active", "x")];
-        assert!(!render_table(&plain, 80).contains("PROGRESS"));
+    fn the_done_column_reports_filled_sections() {
+        let bare = [card("a", "active", "x")];
+        assert!(!plain(&bare, 80).contains("DONE"), "no sections, no column");
 
-        let with = Card::parse(
+        let half = Card::parse(
             "b",
-            "# b\nid: bbbb0000\nstatus: active\nwhat: y\n\n## now\n[x] one\n[ ] two\n",
+            "# b\nid: bbbb0000\nstatus: active\nwhat: y\n\n## now\nparser\n\n## next\n",
             0,
         );
-        let out = render_table(&[card("a", "active", "x"), with], 80);
-        assert!(out.contains("PROGRESS"), "{out}");
+        let out = plain(&[card("a", "active", "x"), half], 80);
+        assert!(out.contains("DONE"), "{out}");
         assert!(out.contains("1/2"), "{out}");
+        assert!(out.contains('▰') && out.contains('▱'), "{out}");
+    }
+
+    #[test]
+    fn a_full_card_fills_the_bar() {
+        let full = Card::parse(
+            "b",
+            "# b\nid: bbbb0000\nstatus: active\nwhat: y\n\n## now\na\n\n## next\nb\n",
+            0,
+        );
+        let out = plain(&[full], 80);
+        assert!(out.contains("▰▰▰▰ 2/2"), "{out}");
     }
 
     #[test]
     fn the_hash_column_shows_a_short_unique_prefix() {
         let cards = [card("a", "active", "x"), card("b", "idea", "y")];
-        let out = render_table(&cards, 80);
+        let out = plain(&cards, 80);
         assert!(out.contains("HASH"));
         for (row, c) in out.lines().skip(1).take(2).zip(cards.iter()) {
             assert!(row.trim_start().starts_with(&c.id[..4]), "{row}");
@@ -252,8 +298,8 @@ mod tests {
     #[test]
     fn a_piped_card_is_the_file_verbatim() {
         let c = Card::parse("a", "# a\nid: aaaa0000\nstatus: active\n", 0);
-        assert_eq!(render_card(&c), "# a\nid: aaaa0000\nstatus: active\n");
-        assert!(!render_card(&c).contains(RESET));
+        assert_eq!(render_card_with(&c, false), "# a\nid: aaaa0000\nstatus: active\n");
+        assert!(!render_card_with(&c, false).contains(RESET));
     }
 
     #[test]

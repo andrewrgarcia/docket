@@ -6,11 +6,11 @@ One folder of markdown files. No database, no daemon, no config. The command
 is `dk`.
 
 ```
-  HASH  NAME           STATUS    AGE  PROGRESS  WHAT
-  a43b  moxi           active     3d       2/5  semantic spatial description language
-  7f20  yggdrasil-cli  active     9d            project flattener and diff engine
-  c118  kol-game       idea     142d       0/3  retro whimsical browser game
-  0e94  membrane       dead     201d            replaced by docket
+  HASH  NAME           STATUS    AGE  DONE      WHAT
+  a43b  moxi           active     3d  ▰▰▰▱ 3/4  semantic spatial description language
+  7f20  yggdrasil-cli  active     9d  ▰▰▰▰ 4/4  project flattener and diff engine
+  c118  kol-game       idea     142d  ▰▱▱▱ 1/4  retro whimsical browser game
+  0e94  membrane       dead     201d  ▱▱▱▱ 0/4  replaced by docket
 
 4 cards
 ```
@@ -22,8 +22,9 @@ the last commit or staged change; for anything else, the last time the card
 was edited. docket's own rewrites never count, so `sync` cannot make a
 forgotten project look fresh.
 
-**PROGRESS** is ticked boxes over total, counted in the card's own sections,
-and only shows up when some card has a checkbox.
+**DONE** is how much of the card you have actually written: sections with
+something in them over sections in total. An idea you jotted and abandoned
+shows `▱▱▱▱ 0/4` and says so at a glance.
 
 Every card has an eight-character hash, fixed for its lifetime, and answers to
 any unambiguous prefix of it: `dk a43b`, `dk show 7f2`. The column shows the
@@ -118,7 +119,7 @@ own: a card that rewrites itself is a card you stop trusting.
 | `dk open [name]` | open a card in your desktop editor; no name opens the folder |
 | `dk add [path]` | new card; no path means an idea |
 | `dk sync [name]` | re-read project READMEs into their cards |
-| `dk pick` | tick cards, write `DOCKET.md` |
+| `dk pick` | browse, choose sections, write `DOCKET.md` (alias `dk tree`) |
 | `dk out` | write every card to `DOCKET.md` |
 | `dk rename <old> <new>` | rename a card, heading and all |
 | `dk rm <name>` | delete, after you type the name back |
@@ -132,13 +133,57 @@ everything else.
 
 ## Picking
 
-`dk pick` opens a list you arrow through. Space ticks, `a` ticks everything,
-`n` clears, enter writes the file, `q` cancels. The bar along the bottom keeps
-a running token estimate of what you have chosen, so you know what the brief
-costs before you send it.
+`dk pick` (alias `dk tree`) is the whole store as a fold-out tree with a
+checkbox beside every card and every section. It is where you decide what a
+model gets to see.
 
-Nothing is remembered between runs. Picking takes five seconds and a stale
-selection is worse than no selection.
+```
+▦ dk pick  8 cards · 31 sections · ☑ 7/19
+
+▶ [~] ▾ moxi        8073  3/4        412 tok
+  [x] ├── ▾ now                      118 tok
+      │   ├── □ M2 — errors that point at the span
+      │   └── ✓ M1 — parser keeps source spans
+  [x] ├── ▸ next                      64 tok
+  [ ] ├── ▸ open questions            21 tok
+  [ ] └── ▸ readme                  2.1k tok
+  [ ] ▸ strategy-arena  91c7  4/4    980 tok
+  [x] ▸ kol-game       c118  1/4      96 tok
+
+▦ 3 sections from 2 cards · 278 tok  → DOCKET.md
+```
+
+Space picks the row under the cursor: a card takes all of it, a section takes
+just that section, and a line takes the section it belongs to. A card that is
+partly picked shows `[~]` and fills up when you press space on it. The README
+is a section like any other — usually the most expensive one, which is why it
+is worth being able to leave behind.
+
+The token count on the right is what that row costs in context, coloured on
+the same thresholds `ygg` uses: grey under 200, green under 1k, amber under
+4k, red above. The footer totals what you have chosen, header lines included.
+
+| key | |
+|---|---|
+| `↑↓` `jk`, mouse | move |
+| `space`, click the box | pick / unpick |
+| `enter` `→` `l`, click the row | open |
+| `←` `h` | close, or jump to the parent |
+| `o` | open every card to its headings |
+| `*` | open or shut everything |
+| `z` | collapse |
+| `t` | tick the checkbox on this line, written to the card at once |
+| `N` `X` `R` | pick every `now` / `next` / `readme`, across all cards |
+| `a` `n` | pick everything / nothing |
+| `e` | edit this card, then come back |
+| `w` | write the file |
+| `q` `Esc` | leave |
+
+Picking a section writes the card's header with it, so `## now` never arrives
+without the card it belongs to. Nothing is remembered between runs — picking
+takes five seconds and a stale selection is worse than none.
+
+`dk out` skips the screen and writes every card whole.
 
 ## Editing
 

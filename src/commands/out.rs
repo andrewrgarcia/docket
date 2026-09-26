@@ -3,7 +3,6 @@ use std::path::PathBuf;
 
 use crate::brief;
 use crate::error::{Error, Result};
-use crate::pick::{self, Choice};
 use crate::store::Store;
 use crate::theme::{self, BOLD, CYAN, DIM, GREEN};
 
@@ -16,19 +15,9 @@ pub fn all(store: &Store, out: Option<&str>) -> Result<()> {
     write(&brief::build(&cards, &[]), cards.len(), out)
 }
 
-/// The picker, then the same file.
+/// The picker owns its own writing, since it knows which sections were taken.
 pub fn picked(store: &Store, out: Option<&str>) -> Result<()> {
-    let cards = store.cards()?;
-    match pick::run(&cards)? {
-        Choice::Cancelled => {
-            println!("{}", theme::paint("cancelled", &[DIM]));
-            Ok(())
-        }
-        Choice::Write(chosen) if chosen.is_empty() => Err(Error::other(
-            "nothing picked — space ticks a card, enter writes the file",
-        )),
-        Choice::Write(chosen) => write(&brief::build(&cards, &chosen), chosen.len(), out),
-    }
+    crate::pick::run(store, out)
 }
 
 fn write(text: &str, count: usize, out: Option<&str>) -> Result<()> {

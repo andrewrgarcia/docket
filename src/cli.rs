@@ -9,7 +9,8 @@ dk — every project and idea you have, in one list.
   dk open [name]        open a card in your desktop editor (no name: the folder)
   dk add [path]         new card; no path means an idea
   dk sync [name]        re-read project READMEs into their cards
-  dk pick               choose cards, write DOCKET.md
+  dk pick               browse and choose what to send, write DOCKET.md
+                        (alias: dk tree)
   dk out                write every card to DOCKET.md
   dk rename <old> <new> rename a card
   dk rm <name>          delete a card
@@ -64,7 +65,7 @@ where
         "open" => Ok(Command::Open(operands.first().cloned())),
         "add" => Ok(Command::Add(operands.first().cloned())),
         "sync" => Ok(Command::Sync(operands.first().cloned())),
-        "pick" => Ok(Command::Pick { out }),
+        "pick" | "p" | "tree" | "t" => Ok(Command::Pick { out }),
         "out" => Ok(Command::Out { out }),
         "rm" | "remove" => Ok(Command::Remove(one("rm <name>")?)),
         "rename" | "mv" => match operands {
@@ -122,6 +123,13 @@ mod tests {
     fn an_unknown_word_is_a_card_name() {
         assert_eq!(parse_words("moxi").unwrap(), Command::Show("moxi".into()));
         assert_eq!(parse_words("show moxi").unwrap(), Command::Show("moxi".into()));
+    }
+
+    #[test]
+    fn tree_is_an_alias_for_pick() {
+        for word in ["pick", "p", "tree", "t"] {
+            assert_eq!(parse_words(word).unwrap(), Command::Pick { out: None }, "{word}");
+        }
     }
 
     #[test]

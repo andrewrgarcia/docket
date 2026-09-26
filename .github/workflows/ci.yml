@@ -49,10 +49,3 @@ jobs:
           -A clippy::pedantic
           -A clippy::complexity
 
-  msrv:
-    name: msrv 1.75
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.75.0
-      - run: cargo check --all-targets

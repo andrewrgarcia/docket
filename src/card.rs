@@ -26,41 +26,53 @@ pub struct Card {
     pub age_days: u64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+/// A card's status. The words docket knows about get a colour and a place in
+/// the sort order; any other word is kept and shown as written.
+///
+/// There is no fixed vocabulary here on purpose. `stable`, `shipped`,
+/// `blocked`, `abandoned` are all things a project can be, and a tool that
+/// prints `-` because it has not heard of your word is telling you its
+/// opinion matters more than your note.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Status {
     Active,
     Idea,
     Paused,
     Done,
     Dead,
-    /// Anything else the user typed; kept verbatim by the store.
-    Other,
+    /// Whatever the user wrote, verbatim.
+    Other(String),
+    /// No `status:` line at all.
+    Unset,
 }
 
 impl Status {
     pub fn parse(s: &str) -> Status {
-        match s.trim().to_ascii_lowercase().as_str() {
+        let word = s.trim();
+        match word.to_ascii_lowercase().as_str() {
+            "" => Status::Unset,
             "active" => Status::Active,
             "idea" => Status::Idea,
             "paused" => Status::Paused,
             "done" => Status::Done,
             "dead" => Status::Dead,
-            _ => Status::Other,
+            _ => Status::Other(word.to_string()),
         }
     }
 
-    pub fn as_str(&self) -> &'static str {
+    pub fn as_str(&self) -> &str {
         match self {
             Status::Active => "active",
             Status::Idea => "idea",
             Status::Paused => "paused",
             Status::Done => "done",
             Status::Dead => "dead",
-            Status::Other => "-",
+            Status::Other(word) => word,
+            Status::Unset => "-",
         }
     }
 
-    /// Done and dead cards sort last and print dim.
+    /// Finished work sorts last and prints dim.
     pub fn is_cold(&self) -> bool {
         matches!(self, Status::Done | Status::Dead)
     }
@@ -279,6 +291,27 @@ mod tests {
         assert_eq!(c.what, "a language");
         assert_eq!(c.path, "/home/a/moxi");
         assert_eq!(c.age_days, 3);
+    }
+
+    #[test]
+    fn an_unknown_status_is_kept_as_written() {
+        let c = Card::parse("flashcall", "# flashcall\nid: a\nstatus: stable\n", 0);
+        assert_eq!(c.status, Status::Other("stable".into()));
+        assert_eq!(c.status.as_str(), "stable");
+        assert!(!c.status.is_cold());
+    }
+
+    #[test]
+    fn a_missing_status_reads_as_unset() {
+        let c = Card::parse("x", "# x\nid: a\n", 0);
+        assert_eq!(c.status, Status::Unset);
+        assert_eq!(c.status.as_str(), "-");
+    }
+
+    #[test]
+    fn known_words_are_recognised_whatever_their_case() {
+        assert_eq!(Status::parse("Active"), Status::Active);
+        assert_eq!(Status::parse("  DEAD "), Status::Dead);
     }
 
     #[test]

@@ -54,8 +54,10 @@ pub fn status_color(status: &str) -> &'static str {
         "active" => GREEN,
         "idea" => CYAN,
         "paused" => YELLOW,
-        "done" => GREY,
-        "dead" => GREY,
-        _ => GREY,
+        "done" | "dead" => GREY,
+        // A word docket does not know is still a word the user chose, so it
+        // gets a colour of its own rather than the dim of a dead project.
+        "-" => GREY,
+        _ => MAGENTA,
     }
 }

@@ -115,9 +115,44 @@ fn render_table(cards: &[Card], width: usize, color: bool) -> String {
     }
 
     out.push('\n');
-    out.push_str(&ink(color, &format!("{} cards", cards.len()), &[DIM]));
+    out.push_str(&ink(color, &summary(cards, &filled), &[DIM]));
     out.push('\n');
     out
+}
+
+/// Days after which a project counts as forgotten. A quarter is long enough
+/// that a slow month does not accuse you, and short enough that a year does.
+const STALE_DAYS: u64 = 90;
+
+/// The line under the table. "14 cards" on its own says nothing the table did
+/// not; these are the three numbers the table cannot show at a glance.
+fn summary(cards: &[Card], filled: &[(usize, usize)]) -> String {
+    let stale = cards.iter().filter(|c| c.age_days >= STALE_DAYS && !c.status.is_cold()).count();
+    let (written, total) = filled
+        .iter()
+        .fold((0, 0), |(w, t), (f, s)| (w + f, t + s));
+    let tokens: usize = cards.iter().map(|c| c.body.chars().count() / 4).sum();
+
+    let mut parts = vec![format!("{} cards", cards.len())];
+    if stale > 0 {
+        parts.push(format!("{stale} untouched {STALE_DAYS}d+"));
+    }
+    if total > 0 {
+        parts.push(format!("{written}/{total} sections written"));
+    }
+    parts.push(format!("~{} tokens", human(tokens)));
+    parts.join(" · ")
+}
+
+/// Thousands as `48k`, so the total fits beside the rest.
+fn human(tokens: usize) -> String {
+    if tokens >= 1_000_000 {
+        format!("{:.1}M", tokens as f64 / 1_000_000.0)
+    } else if tokens >= 1_000 {
+        format!("{:.1}k", tokens as f64 / 1_000.0)
+    } else {
+        tokens.to_string()
+    }
 }
 
 /// A card for reading: the same text, coloured by line kind.
@@ -300,6 +335,38 @@ mod tests {
         let c = Card::parse("a", "# a\nid: aaaa0000\nstatus: active\n", 0);
         assert_eq!(render_card_with(&c, false), "# a\nid: aaaa0000\nstatus: active\n");
         assert!(!render_card_with(&c, false).contains(RESET));
+    }
+
+    #[test]
+    fn the_summary_reports_what_the_table_cannot_show() {
+        let fresh = Card::parse("a", "# a\nid: aaaa0000\nstatus: active\n\n## now\nx\n", 3);
+        let mut old = Card::parse("b", "# b\nid: bbbb0000\nstatus: active\n\n## now\n", 0);
+        old.age_days = 200;
+
+        let cards = [fresh, old];
+        let filled: Vec<(usize, usize)> = cards.iter().map(Card::completion).collect();
+        let line = summary(&cards, &filled);
+
+        assert!(line.contains("2 cards"), "{line}");
+        assert!(line.contains("1 untouched 90d+"), "{line}");
+        assert!(line.contains("1/2 sections written"), "{line}");
+        assert!(line.contains("tokens"), "{line}");
+    }
+
+    #[test]
+    fn a_fresh_store_does_not_mention_staleness() {
+        let cards = [card("a", "active", "x")];
+        let filled: Vec<(usize, usize)> = cards.iter().map(Card::completion).collect();
+        let line = summary(&cards, &filled);
+        assert!(!line.contains("untouched"), "{line}");
+    }
+
+    #[test]
+    fn a_finished_project_is_not_counted_as_forgotten() {
+        let mut done = Card::parse("b", "# b\nid: bbbb0000\nstatus: done\n", 0);
+        done.age_days = 400;
+        let filled = vec![done.completion()];
+        assert!(!summary(&[done], &filled).contains("untouched"));
     }
 
     #[test]

@@ -1,4 +1,11 @@
+<!-- LOGO -->
+<p align="center">
+<img width="200"  alt="docket" src="https://github.com/user-attachments/assets/259fb6e2-c9e3-45be-b180-b6dfcc555823" />
+
+</p>
+
 # docket
+
 
 **Every project and idea you have, in one list, ready to hand to any AI.**
 

@@ -311,6 +311,15 @@ fn draw(picker: &mut Picker, rows: &[Row], flash: Option<&str>, out: &mut impl W
             Mark::Partial => ("[~]", AMBER),
             Mark::None => ("[ ]", MUTED),
         };
+
+        // Everything left of the label is fixed width, so the label gets
+        // whatever is left. A row that overruns the terminal wraps, and a
+        // wrapped row scrolls the ones below it off the screen — which is how
+        // a README's 200-character HTML line corrupts the whole frame.
+        let gutter = 2 + 4 + row.prefix.chars().count() + 2;
+        let reserve = if matches!(row.kind, Kind::Line { .. }) { 1 } else { 14 };
+        let room = (width as usize).saturating_sub(gutter + reserve);
+
         queue!(
             out,
             Print(if is_cursor { "▶ " } else { "  " }),
@@ -323,72 +332,70 @@ fn draw(picker: &mut Picker, rows: &[Row], flash: Option<&str>, out: &mut impl W
             ResetColor,
         )?;
 
+        // Characters actually drawn after the gutter, so the token column
+        // pads from what is on screen rather than from what was asked for.
+        let drawn;
+
         match row.kind {
             Kind::Card => {
                 let card = picker.card(row.card);
                 let (filled, total) = card.completion();
+                let tail = format!("  {}  {filled}/{total}", &card.id[..4.min(card.id.len())]);
+                let name = cut(&row.text, room.saturating_sub(tail.chars().count()));
+                drawn = name.chars().count() + tail.chars().count();
                 queue!(
                     out,
                     SetForegroundColor(CYAN),
                     SetAttribute(Attribute::Bold),
-                    Print(if !row.foldable {
-                        "· "
-                    } else if row.expanded {
-                        "▾ "
-                    } else {
-                        "▸ "
-                    }),
-                    Print(&row.text),
+                    Print(marker(row)),
+                    Print(name),
                     SetAttribute(Attribute::Reset),
                     ResetColor,
                     SetForegroundColor(MUTED),
-                    Print(format!("  {}  {filled}/{total}", &card.id[..4.min(card.id.len())])),
+                    Print(tail),
                     ResetColor,
                 )?;
             }
             // A card's own section is amber; anything nested inside one came
             // from a README and is drawn cooler, so the two never blur.
             Kind::Node { .. } => {
-                let nested = row.depth > 0;
-                let marker = if !row.foldable {
-                    "· "
-                } else if row.expanded {
-                    "▾ "
-                } else {
-                    "▸ "
-                };
+                let title = cut(&row.text, room);
+                drawn = title.chars().count();
                 queue!(
                     out,
-                    SetForegroundColor(if nested { MUTED } else { AMBER }),
-                    Print(marker),
-                    Print(&row.text),
+                    SetForegroundColor(if row.depth > 0 { MUTED } else { AMBER }),
+                    Print(marker(row)),
+                    Print(title),
                     ResetColor,
                 )?
             }
-            Kind::Line { .. } => match checkbox::find(&row.text) {
-                Some(mark) => queue!(
-                    out,
-                    SetForegroundColor(if mark.done { MUTED } else { GREEN }),
-                    Print(if mark.done { "✓ " } else { "□ " }),
-                    Print(strip_box(&row.text)),
-                    ResetColor,
-                )?,
-                None => queue!(
-                    out,
-                    SetForegroundColor(MUTED),
-                    Print("  "),
-                    Print(row.text.trim_start()),
-                    ResetColor,
-                )?,
-            },
+            Kind::Line { .. } => {
+                drawn = 0; // lines carry no token column
+                match checkbox::find(&row.text) {
+                    Some(mark) => queue!(
+                        out,
+                        SetForegroundColor(if mark.done { MUTED } else { GREEN }),
+                        Print(if mark.done { "✓ " } else { "□ " }),
+                        Print(cut(&strip_box(&row.text), room)),
+                        ResetColor,
+                    )?,
+                    None => queue!(
+                        out,
+                        SetForegroundColor(MUTED),
+                        Print("  "),
+                        Print(cut(row.text.trim_start(), room)),
+                        ResetColor,
+                    )?,
+                }
+            }
         }
 
         // token column, aligned past the longest name
         if !matches!(row.kind, Kind::Line { .. }) {
-            let used = row.prefix.chars().count() + row.text.chars().count() + 2;
+            let used = row.prefix.chars().count() + drawn + 2;
             let pad = name_width.saturating_sub(used) + 2;
             let tok = human(row.tokens);
-            if used + pad + 18 < width as usize {
+            if gutter + drawn + pad + 12 < width as usize {
                 queue!(
                     out,
                     Print(" ".repeat(pad + 7usize.saturating_sub(tok.chars().count()))),
@@ -452,6 +459,33 @@ fn draw(picker: &mut Picker, rows: &[Row], flash: Option<&str>, out: &mut impl W
 
     final_out.write_all(&buf)?;
     final_out.flush()
+}
+
+/// The fold marker for a row: open, shut, or nothing to open.
+fn marker(row: &Row) -> &'static str {
+    if !row.foldable {
+        "· "
+    } else if row.expanded {
+        "▾ "
+    } else {
+        "▸ "
+    }
+}
+
+/// Cut to `max` characters, ending in an ellipsis when something was lost.
+/// Counts characters, never bytes.
+fn cut(text: &str, max: usize) -> String {
+    if max == 0 {
+        return String::new();
+    }
+    if text.chars().count() <= max {
+        return text.to_string();
+    }
+    if max == 1 {
+        return "…".into();
+    }
+    let kept: String = text.chars().take(max - 1).collect();
+    format!("{}…", kept.trim_end())
 }
 
 /// The text of a checkbox line without its `- [ ] ` marker.

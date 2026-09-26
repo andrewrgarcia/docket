@@ -1,25 +1,43 @@
 # cargo-make. Cross-platform on purpose: no GNU make, no shell scripts.
+#
+# `makers ci` is what CI runs: tests on the things that can break, lints for
+# the things that can bite. Formatting is available as `makers fmt` but is
+# never a gate — rustfmt reflows code that was laid out deliberately, and a
+# style disagreement is not a broken build.
+
 [config]
 default_to_workspace = false
-
-[tasks.check]
-command = "cargo"
-args = ["clippy", "--all-targets", "--", "-D", "warnings"]
-
-[tasks.fmt]
-command = "cargo"
-args = ["fmt", "--all"]
 
 [tasks.test]
 command = "cargo"
 args = ["test", "--all-targets"]
+
+# Correctness and footguns only. Style and pedantry are off.
+[tasks.lint]
+command = "cargo"
+args = [
+    "clippy", "--all-targets", "--",
+    "-D", "clippy::correctness",
+    "-D", "clippy::suspicious",
+    "-W", "clippy::unwrap_used",
+    "-W", "clippy::expect_used",
+    "-W", "clippy::indexing_slicing",
+    "-A", "clippy::style",
+    "-A", "clippy::pedantic",
+    "-A", "clippy::complexity",
+]
 
 [tasks.build]
 command = "cargo"
 args = ["build", "--release"]
 
 [tasks.ci]
-dependencies = ["fmt", "check", "test", "build"]
+dependencies = ["test", "lint", "build"]
+
+# Opt-in, never automatic.
+[tasks.fmt]
+command = "cargo"
+args = ["fmt", "--all"]
 
 [tasks.install]
 command = "cargo"

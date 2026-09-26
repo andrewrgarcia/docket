@@ -1,11 +1,4 @@
-<!-- LOGO -->
-<p align="center">
-<img width="200"  alt="docket" src="https://github.com/user-attachments/assets/259fb6e2-c9e3-45be-b180-b6dfcc555823" />
-
-</p>
-
 # docket
-
 
 **Every project and idea you have, in one list, ready to hand to any AI.**
 
@@ -273,10 +266,16 @@ There is no undo. `rm` makes you type the name for that reason.
 ## Development
 
 ```bash
-cargo make ci      # fmt, clippy -D warnings, tests, release build
+makers ci        # tests, correctness lints, release build
+makers fmt       # rustfmt, if you want it — never run automatically
 ```
 
 cargo-make, not GNU make: the task file has to work on Windows too.
+
+CI runs the tests on Linux, macOS and Windows, a clippy pass limited to
+correctness and footguns, and a build against the minimum Rust version. It
+does not check formatting and does not fail on style lints. A red badge means
+something is broken.
 
 The tests are the specification. `tests/cli.rs` drives the real binary against
 a throwaway `DOCKET_HOME`; unit tests cover the buffer, the wrapping, the

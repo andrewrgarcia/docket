@@ -111,6 +111,13 @@ pub fn parse(body: &str) -> Outline {
         // Rules 1 to 3: a fresh level-2 heading continues the card's own run.
         let is_root = spine && level == 2 && !used.contains(&title);
         if is_root {
+            // `readme` is terminal. Everything after it is the project's own
+            // document, and a README that opens with HTML rather than a `#`
+            // title — a centred logo, a badge block — would otherwise let its
+            // first `## Install` look like a fresh section of the card.
+            if title == "readme" {
+                spine = false;
+            }
             used.push(title);
             let index = push(&mut outline, line, level, None, 0);
             outline.roots.push(index);
@@ -261,6 +268,28 @@ a table
             .unwrap();
         assert_eq!(titles(&outline, &outline.nodes[install].children), vec!["From source"]);
         assert_eq!(outline.nodes[install].depth + 1, outline.nodes[outline.nodes[install].children[0]].depth);
+    }
+
+    #[test]
+    fn a_readme_that_opens_with_html_still_ends_the_run() {
+        // FUR's README: a centred logo and badges, no `#` title at all, then
+        // `## Why FUR exists`. Without the terminal rule that heading becomes
+        // a section of the card.
+        let outline = parse(
+            "## now\nx\n\n## readme\n\n<p align=\"center\">\n<h1>FUR</h1>\n</p>\n\n## Why FUR exists\nchats vanish\n\n## Installation\ncargo install\n",
+        );
+        assert_eq!(titles(&outline, &outline.roots), vec!["now", "readme"]);
+        let readme = outline.roots[1];
+        assert_eq!(
+            titles(&outline, &outline.nodes[readme].children),
+            vec!["Why FUR exists", "Installation"]
+        );
+    }
+
+    #[test]
+    fn sections_after_the_readme_are_never_roots_even_when_fresh() {
+        let outline = parse("## now\na\n\n## readme\nb\n\n## Usage\nc\n\n## Language\nd\n");
+        assert_eq!(titles(&outline, &outline.roots), vec!["now", "readme"]);
     }
 
     #[test]

@@ -182,19 +182,24 @@ under 4k, red above. The footer totals the selection, card headers included.
 | `space`, click the box | take / drop, with everything under it |
 | `enter` `→` `l`, click the row | open |
 | `←` `h` | close, or jump to the parent |
-| `o` | open every card to its own sections |
-| `*` | open or shut everything |
-| `z` | collapse |
-| `t` | tick the checkbox on this line, written to the card at once |
-| `N` `X` `R` | take every `now` / `next` / `readme` — card sections only |
-| `a` `n` | take everything / nothing |
-| `e` | edit this card, then come back |
-| `w` | write the file |
+| `a` | take everything / nothing |
+| `c` | copy the selection to the clipboard |
+| `p` | print it to `DOCKET.md` |
+| `z` | pack it as `DOCKET.zip`, one markdown file per card |
 | `q` `Esc` | leave |
+
+`c` uses `wl-copy`, `xclip`, `xsel`, `pbcopy` or `clip.exe`, and falls back to
+OSC 52 so it works over SSH — that route is size-capped and silently dropped
+by some terminals, so it is reported as attempted rather than done.
+
+`z` writes an archive holding `INDEX.md` and one `<card>.md` per chosen card,
+for the models that would rather read files than one long paste.
 
 Picking a heading writes the card's header with it, so `## now` never arrives
 without the card it belongs to, and chosen headings are emitted in document
 order. Nothing is remembered between runs.
+
+`--out <file>` redirects `p` and `z` as well as `dk out`.
 
 `dk out` skips the screen and writes every card whole.
 

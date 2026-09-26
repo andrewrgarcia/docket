@@ -26,6 +26,7 @@ include = [
 [dependencies]
 dirs = "6.0"
 crossterm = "0.28"
+zip = { version = "2.2", default-features = false, features = ["deflate"] }
 
 [[bin]]
 name = "dk"

@@ -63,10 +63,12 @@ fn human(tokens: usize) -> String {
 
 pub enum Outcome {
     Quit,
-    /// `w` — write the selection.
-    Write,
-    /// `e` — edit this card, then come back.
-    Edit(String),
+    /// `p` — print the selection to a markdown file.
+    Print,
+    /// `c` — the same text, straight to the clipboard.
+    Copy,
+    /// `z` — one markdown file per card, in a zip.
+    Zip,
 }
 
 /// Restores the terminal even if the loop returns early — a picker that leaves
@@ -88,12 +90,7 @@ impl Drop for TermGuard {
     }
 }
 
-/// `on_tick` receives cards a keystroke changed, so a ticked box reaches disk
-/// at once rather than at exit.
-pub fn run(
-    picker: &mut Picker,
-    on_tick: &mut dyn FnMut(&[(String, String)]) -> Result<()>,
-) -> Result<Outcome> {
+pub fn run(picker: &mut Picker) -> Result<Outcome> {
     let _guard = TermGuard::enter().map_err(term)?;
     let mut out = io::stdout();
     let mut flash: Option<String> = None;
@@ -108,7 +105,7 @@ pub fn run(
         let verdict = match event::read().map_err(term)? {
             Event::Key(key) if key.kind != KeyEventKind::Release => {
                 flash = None;
-                on_key(picker, &rows, key, &mut flash)
+                on_key(picker, &rows, key)
             }
             Event::Mouse(m) => {
                 flash = None;
@@ -118,25 +115,21 @@ pub fn run(
             _ => Verdict::Continue,
         };
 
-        let changed = picker.take_dirty();
-        if !changed.is_empty() {
-            on_tick(&changed)?;
-        }
-
         match verdict {
             Verdict::Continue => {}
             Verdict::Quit => return Ok(Outcome::Quit),
-            Verdict::Edit => {
-                if let Some(row) = rows.get(picker.cursor) {
-                    return Ok(Outcome::Edit(picker.card(row.card).name.clone()));
-                }
-            }
-            Verdict::Write => {
+            // Producing an empty brief would be a confusing no-op, and
+            // silently ignoring the key is indistinguishable from a dead key.
+            Verdict::Print | Verdict::Copy | Verdict::Zip => {
                 if picker.selection().is_empty() {
-                    flash = Some("nothing picked — space takes a card or a section".into());
+                    flash = Some("nothing picked — press space to take a card first".into());
                     continue;
                 }
-                return Ok(Outcome::Write);
+                return Ok(match verdict {
+                    Verdict::Copy => Outcome::Copy,
+                    Verdict::Zip => Outcome::Zip,
+                    _ => Outcome::Print,
+                });
             }
         }
     }
@@ -149,18 +142,20 @@ fn term(e: io::Error) -> Error {
 enum Verdict {
     Continue,
     Quit,
-    Write,
-    Edit,
+    Print,
+    Copy,
+    Zip,
 }
 
-fn on_key(picker: &mut Picker, rows: &[Row], key: KeyEvent, flash: &mut Option<String>) -> Verdict {
+fn on_key(picker: &mut Picker, rows: &[Row], key: KeyEvent) -> Verdict {
     let current = rows.get(picker.cursor).cloned();
 
     match key.code {
         KeyCode::Char('q') | KeyCode::Esc => return Verdict::Quit,
         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => return Verdict::Quit,
-        KeyCode::Char('w') => return Verdict::Write,
-        KeyCode::Char('e') => return Verdict::Edit,
+        KeyCode::Char('p') => return Verdict::Print,
+        KeyCode::Char('c') => return Verdict::Copy,
+        KeyCode::Char('z') => return Verdict::Zip,
 
         KeyCode::Up | KeyCode::Char('k') => picker.cursor = picker.cursor.saturating_sub(1),
         KeyCode::Down | KeyCode::Char('j') => {
@@ -194,20 +189,7 @@ fn on_key(picker: &mut Picker, rows: &[Row], key: KeyEvent, flash: &mut Option<S
                 picker.toggle_select(row);
             }
         }
-        KeyCode::Char('t') => match &current {
-            Some(row) if picker.tick(row).is_some() => {}
-            _ => *flash = Some("no checkbox on that line".into()),
-        },
-
         KeyCode::Char('a') => picker.select_all(),
-        KeyCode::Char('n') => picker.select_none(),
-        KeyCode::Char('N') => picker.select_heading("now"),
-        KeyCode::Char('X') => picker.select_heading("next"),
-        KeyCode::Char('R') => picker.select_heading("readme"),
-
-        KeyCode::Char('*') => picker.toggle_all_folds(),
-        KeyCode::Char('o') => picker.expand_cards(),
-        KeyCode::Char('z') => picker.collapse_all(),
         _ => {}
     }
     Verdict::Continue
@@ -449,16 +431,53 @@ fn draw(picker: &mut Picker, rows: &[Row], flash: Option<&str>, out: &mut impl W
         None => queue!(
             out,
             SetForegroundColor(MUTED),
-            Print(fit(
-                "space pick · enter/→ open · ← close · o cards · * all · t tick · N now · R readme · a all · n none · e edit · w write · q quit",
-                width.saturating_sub(1) as usize
-            )),
+            Print(legend(width.saturating_sub(1) as usize)),
             ResetColor
         )?,
     }
 
     final_out.write_all(&buf)?;
     final_out.flush()
+}
+
+/// Every key, and the shortest honest way to say what it does. The legend is
+/// the only documentation the picker has, so it shrinks rather than being cut
+/// off: full labels if they fit, terse ones if not, and only then are keys
+/// dropped from the right — where the least-used ones live.
+const KEYS: &[(&str, &str, &str)] = &[
+    ("space", "select", "sel"),
+    ("enter/→", "open", "open"),
+    ("←", "close", "close"),
+    ("a", "all", "all"),
+    ("c", "copy", "copy"),
+    ("p", "print", "print"),
+    ("z", "zip", "zip"),
+    ("q", "quit", "quit"),
+];
+
+fn legend(width: usize) -> String {
+    // Three ways to say the same thing, shortest last: full labels, terse
+    // labels, then bare keys. Only once none of those fits whole does the
+    // list start losing entries from the right, where the least-used keys are.
+    for stage in 0..3 {
+        let full: Vec<String> = KEYS
+            .iter()
+            .map(|(key, long, short)| match stage {
+                0 => format!("{key} {long}"),
+                1 => format!("{key} {short}"),
+                _ => (*key).to_string(),
+            })
+            .collect();
+
+        for keep in (4..=full.len()).rev() {
+            let line = full[..keep].join(" · ");
+            if line.chars().count() <= width {
+                return line;
+            }
+        }
+    }
+    // Narrower than four bare keys: show what will fit of them.
+    fit(&KEYS.iter().map(|(k, _, _)| *k).collect::<Vec<_>>().join(" · "), width)
 }
 
 /// The fold marker for a row: open, shut, or nothing to open.
@@ -499,4 +518,63 @@ fn strip_box(line: &str) -> String {
 
 fn fit(text: &str, width: usize) -> String {
     text.chars().take(width).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_legend_never_overruns_its_width() {
+        for width in [20usize, 30, 40, 60, 80, 100, 200] {
+            let line = legend(width);
+            assert!(
+                line.chars().count() <= width,
+                "width {width}: {} chars in {line:?}",
+                line.chars().count()
+            );
+        }
+    }
+
+    #[test]
+    fn a_wide_terminal_gets_every_key_spelled_out() {
+        let line = legend(200);
+        for (key, label, _) in KEYS {
+            assert!(line.contains(key), "{key} missing");
+            assert!(line.contains(label), "{label} missing");
+        }
+    }
+
+    #[test]
+    fn a_narrow_terminal_falls_back_to_bare_keys_before_dropping_any() {
+        let line = legend(40);
+        for (key, _, _) in KEYS {
+            assert!(line.contains(key), "{key} dropped at 40 columns: {line:?}");
+        }
+        assert!(!line.contains("select"), "labels should go before keys do");
+    }
+
+    #[test]
+    fn the_essential_keys_survive_the_narrowest_useful_terminal() {
+        let line = legend(24);
+        for key in ["space", "enter/→", "←", "a"] {
+            assert!(line.contains(key), "{key} dropped at 24 columns: {line:?}");
+        }
+    }
+
+    #[test]
+    fn cut_counts_characters_not_bytes() {
+        assert_eq!(cut("añañañ", 4), "aña…");
+        assert_eq!(cut("añ", 4), "añ");
+        assert_eq!(cut("abc", 1), "…");
+        assert_eq!(cut("abc", 0), "");
+    }
+
+    #[test]
+    fn human_tokens_shorten_as_they_grow() {
+        assert_eq!(human(0), "0");
+        assert_eq!(human(999), "999");
+        assert_eq!(human(1_500), "1.5k");
+        assert_eq!(human(2_400_000), "2.4M");
+    }
 }

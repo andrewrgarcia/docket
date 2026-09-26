@@ -10,7 +10,6 @@
 use std::collections::BTreeSet;
 
 use crate::card::Card;
-use crate::checkbox;
 use crate::outline::Outline;
 
 /// One line of the tree.
@@ -58,7 +57,6 @@ struct Node {
     selected: BTreeSet<usize>,
     open: BTreeSet<usize>,
     expanded: bool,
-    dirty: bool,
 }
 
 #[derive(Debug)]
@@ -95,7 +93,6 @@ impl Picker {
                     selected: BTreeSet::new(),
                     open: BTreeSet::new(),
                     expanded: false,
-                    dirty: false,
                 }
             })
             .collect();
@@ -229,35 +226,8 @@ impl Picker {
         self.fold(row, open);
     }
 
-    pub fn toggle_all_folds(&mut self) {
-        let all_open = self
-            .nodes
-            .iter()
-            .all(|n| n.expanded && n.open.len() == n.outline.nodes.len());
-        for node in &mut self.nodes {
-            node.expanded = !all_open;
-            node.open = if all_open {
-                BTreeSet::new()
-            } else {
-                (0..node.outline.nodes.len()).collect()
-            };
-        }
-    }
 
-    /// Cards open, their own sections visible, nothing deeper: the overview.
-    pub fn expand_cards(&mut self) {
-        for node in &mut self.nodes {
-            node.expanded = true;
-            node.open.clear();
-        }
-    }
 
-    pub fn collapse_all(&mut self) {
-        for node in &mut self.nodes {
-            node.expanded = false;
-            node.open.clear();
-        }
-    }
 
     // -- selecting ---------------------------------------------------------
 
@@ -303,39 +273,6 @@ impl Picker {
         }
     }
 
-    pub fn select_none(&mut self) {
-        for node in &mut self.nodes {
-            node.selected.clear();
-        }
-    }
-
-    /// One of the card's own sections, across every card — how you take "just
-    /// the `now` of everything" in a keystroke. Only roots match, so a
-    /// README's own `## now` is never swept up.
-    pub fn select_heading(&mut self, title: &str) {
-        let matches = |node: &Node| -> Vec<usize> {
-            node.outline
-                .roots
-                .iter()
-                .filter(|at| node.outline.nodes[**at].title().eq_ignore_ascii_case(title))
-                .flat_map(|at| node.outline.subtree(*at))
-                .collect()
-        };
-        let any_off = self
-            .nodes
-            .iter()
-            .any(|n| matches(n).iter().any(|at| !n.selected.contains(at)));
-
-        for node in &mut self.nodes {
-            for at in matches(node) {
-                if any_off {
-                    node.selected.insert(at);
-                } else {
-                    node.selected.remove(&at);
-                }
-            }
-        }
-    }
 
     /// `(card name, chosen node indices)` for every card with a selection.
     pub fn selection(&self) -> Vec<(String, Vec<usize>)> {
@@ -363,58 +300,6 @@ impl Picker {
         (cards, headings, tokens)
     }
 
-    // -- ticking -----------------------------------------------------------
-
-    /// Flip a checkbox, in the view and in the card's text. Returns the card
-    /// index when something changed, so the caller can save it.
-    pub fn tick(&mut self, row: &Row) -> Option<usize> {
-        let Kind::Line { node: at, line } = row.kind else {
-            return None;
-        };
-        let node = &mut self.nodes[row.card];
-        let old = node.shown[at][line].clone();
-        let flipped = checkbox::toggle(&old)?;
-
-        // The card's text is the truth; the view is a copy. Rewrite the one
-        // matching line, not the section, so nothing else can shift.
-        let mut replaced = false;
-        let body: Vec<String> = node
-            .card
-            .body
-            .lines()
-            .map(|l| {
-                if !replaced && l == old {
-                    replaced = true;
-                    flipped.clone()
-                } else {
-                    l.to_string()
-                }
-            })
-            .collect();
-        if !replaced {
-            return None;
-        }
-        node.card.body = format!("{}\n", body.join("\n"));
-        node.shown[at][line] = flipped.clone();
-        if let Some(slot) = node.outline.nodes[at].lines.iter_mut().find(|l| **l == old) {
-            *slot = flipped;
-        }
-        node.dirty = true;
-        Some(row.card)
-    }
-
-    /// `(name, body)` for every card changed since the last call.
-    pub fn take_dirty(&mut self) -> Vec<(String, String)> {
-        let mut out = Vec::new();
-        for node in &mut self.nodes {
-            if node.dirty {
-                node.dirty = false;
-                out.push((node.card.name.clone(), node.card.body.clone()));
-            }
-        }
-        out
-    }
-
     /// `(cards, headings, ticked, boxes)` in the whole store.
     pub fn totals(&self) -> (usize, usize, usize, usize) {
         let headings = self.nodes.iter().map(|n| n.outline.nodes.len()).sum();
@@ -425,14 +310,24 @@ impl Picker {
             .fold((0, 0), |(d, t), (nd, nt)| (d + nd, t + nt));
         (self.nodes.len(), headings, done, total)
     }
+
+    /// Open every fold. Used by the tests to reach the rows a key press
+    /// would reach; the picker itself opens one row at a time.
+    #[cfg(test)]
+    fn open_everything(&mut self) {
+        for node in &mut self.nodes {
+            node.expanded = true;
+            node.open = (0..node.outline.nodes.len()).collect();
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// A card shaped like the one that exposed the bug: a README with its own
-    /// title and headings, including a `## now` of its own.
+    /// A card shaped like the one that exposed the outline bug: a README with
+    /// its own title and headings, including a `## now` of its own.
     const DOCKET: &str = "\
 # docket-cli
 id: 133f
@@ -465,28 +360,39 @@ cargo install
         ])
     }
 
+    /// Every row, with all folds open — the state a few `→` presses reach.
+    fn opened() -> Picker {
+        let mut p = picker();
+        p.open_everything();
+        p
+    }
+
     fn row_named(p: &Picker, text: &str) -> Row {
         p.rows().into_iter().find(|r| r.text == text).expect(text)
     }
 
     #[test]
+    fn collapsed_by_default_one_row_per_card() {
+        let rows = picker().rows();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].mark, Mark::None);
+    }
+
+    #[test]
     fn a_readmes_headings_are_not_sections_of_the_card() {
-        let mut p = picker();
-        p.expand_cards();
-        let visible: Vec<String> = p
+        let p = opened();
+        let roots: Vec<String> = p
             .rows()
             .iter()
-            .filter(|r| matches!(r.kind, Kind::Node { .. }))
+            .filter(|r| matches!(r.kind, Kind::Node { .. }) && r.depth == 0)
             .map(|r| r.text.clone())
             .collect();
-        assert_eq!(visible, vec!["now", "next", "readme", "now"], "kol's now is last");
-        assert!(!visible.contains(&"Install".to_string()), "nested, not top level");
+        assert_eq!(roots, vec!["now", "next", "readme", "now"], "kol's now is last");
     }
 
     #[test]
     fn opening_the_readme_reveals_its_own_document() {
-        let mut p = picker();
-        p.toggle_all_folds();
+        let p = opened();
         let titles: Vec<String> = p
             .rows()
             .iter()
@@ -500,33 +406,42 @@ cargo install
 
     #[test]
     fn stems_deepen_with_the_tree() {
+        let p = opened();
+        assert!(row_named(&p, "Install").prefix.len() > row_named(&p, "readme").prefix.len());
+    }
+
+    #[test]
+    fn folds_open_and_shut_one_row_at_a_time() {
         let mut p = picker();
-        p.toggle_all_folds();
-        let install = row_named(&p, "Install");
+        let card_row = p.rows()[0].clone();
+        p.toggle_fold(&card_row);
+        assert!(p.rows().iter().any(|r| r.text == "readme"));
+        assert!(!p.rows().iter().any(|r| r.text == "Install"), "not two levels at once");
+
         let readme = row_named(&p, "readme");
-        assert!(install.prefix.len() > readme.prefix.len(), "{:?}", install.prefix);
+        p.fold(&readme, true);
+        assert!(p.rows().iter().any(|r| r.text == "docket"));
+
+        p.fold(&card_row, false);
+        assert_eq!(p.rows().len(), 2);
     }
 
     #[test]
     fn picking_a_heading_takes_everything_under_it() {
-        let mut p = picker();
-        p.toggle_all_folds();
+        let mut p = opened();
         p.toggle_select(&row_named(&p, "readme"));
 
         let (name, chosen) = p.selection().into_iter().next().unwrap();
         assert_eq!(name, "docket-cli");
-        // readme + its `# docket` + The loop + Install
-        assert_eq!(chosen.len(), 4);
+        assert_eq!(chosen.len(), 4, "readme, its title, The loop, Install");
         assert_eq!(row_named(&p, "readme").mark, Mark::All);
         assert_eq!(p.rows()[0].mark, Mark::Partial, "the card is only partly taken");
     }
 
     #[test]
     fn a_readme_subsection_can_be_taken_alone() {
-        let mut p = picker();
-        p.toggle_all_folds();
+        let mut p = opened();
         p.toggle_select(&row_named(&p, "Install"));
-
         assert_eq!(row_named(&p, "Install").mark, Mark::All);
         assert_eq!(row_named(&p, "readme").mark, Mark::Partial);
         assert_eq!(row_named(&p, "The loop").mark, Mark::None);
@@ -534,15 +449,10 @@ cargo install
     }
 
     #[test]
-    fn select_heading_matches_the_cards_own_sections_only() {
-        let mut p = picker();
-        p.select_heading("now");
-        let picked: Vec<(String, usize)> = p
-            .selection()
-            .into_iter()
-            .map(|(name, chosen)| (name, chosen.len()))
-            .collect();
-        assert_eq!(picked, vec![("docket-cli".to_string(), 1), ("kol".to_string(), 1)]);
+    fn a_line_takes_the_heading_it_belongs_to() {
+        let mut p = opened();
+        p.toggle_select(&row_named(&p, "[ ] ship it"));
+        assert_eq!(row_named(&p, "now").mark, Mark::All);
     }
 
     #[test]
@@ -551,55 +461,37 @@ cargo install
         let card_row = p.rows()[0].clone();
         p.toggle_select(&card_row);
         assert_eq!(p.rows()[0].mark, Mark::All);
-        assert_eq!(p.selection()[0].1.len(), 6, "three sections plus the readme's three");
+        assert_eq!(p.selection()[0].1.len(), 6);
         p.toggle_select(&card_row);
         assert!(p.selection().is_empty());
     }
 
     #[test]
-    fn ticking_a_box_rewrites_the_card_and_the_view() {
+    fn select_all_toggles_both_ways() {
         let mut p = picker();
-        p.toggle_all_folds();
-        let row = row_named(&p, "[ ] ship it");
-        assert_eq!(p.tick(&row), Some(0));
-        assert!(p.card(0).body.contains("[x] ship it"));
-        assert!(p.rows().iter().any(|r| r.text == "[x] ship it"));
-        assert_eq!(p.take_dirty().len(), 1);
-        assert!(p.take_dirty().is_empty());
+        p.select_all();
+        assert_eq!(p.cost().0, 2);
+        p.select_all();
+        assert_eq!(p.cost().0, 0);
     }
 
-    #[test]
-    fn ticking_prose_or_a_heading_does_nothing() {
-        let mut p = picker();
-        p.toggle_all_folds();
-        assert_eq!(p.tick(&row_named(&p, "Intro.")), None);
-        assert_eq!(p.tick(&row_named(&p, "readme")), None);
-        assert!(p.take_dirty().is_empty());
-    }
 
     #[test]
-    fn folding_goes_cards_then_sections_then_lines() {
-        let mut p = picker();
-        assert_eq!(p.rows().len(), 2, "collapsed");
-        p.expand_cards();
-        assert!(p.rows().iter().any(|r| matches!(r.kind, Kind::Node { .. })));
-        assert!(!p.rows().iter().any(|r| matches!(r.kind, Kind::Line { .. })));
-        p.toggle_all_folds();
-        assert!(p.rows().iter().any(|r| matches!(r.kind, Kind::Line { .. })));
-        p.collapse_all();
-        assert_eq!(p.rows().len(), 2);
-    }
-
-    #[test]
-    fn a_cost_counts_the_header_once_per_card() {
+    fn cost_counts_the_header_once_per_card() {
         let mut p = picker();
         assert_eq!(p.cost(), (0, 0, 0));
         p.select_all();
         let (cards, headings, tokens) = p.cost();
         assert_eq!((cards, headings), (2, 7));
         assert!(tokens > 0);
-        p.select_all();
-        assert_eq!(p.cost().0, 0);
+    }
+
+    #[test]
+    fn blank_lines_do_not_become_rows() {
+        let mut p = Picker::new(vec![Card::parse("x", "# x\nid: a\n\n## now\n\n\nreal\n\n", 0)]);
+        p.open_everything();
+        let lines = p.rows().into_iter().filter(|r| matches!(r.kind, Kind::Line { .. })).count();
+        assert_eq!(lines, 1);
     }
 
     #[test]

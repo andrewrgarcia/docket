@@ -7,12 +7,37 @@
 use crate::card::Card;
 
 pub const DEFAULT_FILE: &str = "DOCKET.md";
+pub const DEFAULT_ZIP: &str = "DOCKET.zip";
 
 /// Outline-level selection: `(card name, chosen node indices)`, indices into
 /// `Card::outline().nodes`. Each chosen card is written header-first, because
 /// a `## now` with no card around it is unreadable, and chosen nodes are
 /// emitted in document order so a README's structure survives the trip.
 pub fn build_selection(cards: &[Card], selection: &[(String, Vec<usize>)]) -> String {
+    let mut out = index_only(cards, selection);
+    out.push_str("\n## CARDS\n\n");
+    for card in cards {
+        let Some((_, chosen)) = selection.iter().find(|(name, _)| name == &card.name) else {
+            continue;
+        };
+        out.push_str(card.header().trim_end());
+        out.push_str("\n\n");
+
+        let outline = card.outline();
+        for index in 0..outline.nodes.len() {
+            if chosen.contains(&index) {
+                out.push_str(&outline.text_of(index));
+                out.push('\n');
+            }
+        }
+        out.push_str("---\n\n");
+    }
+    out
+}
+
+/// Just the index: every card, with the chosen ones starred. This is the
+/// whole of a zip's `INDEX.md`, and the top of a printed brief.
+pub fn index_only(cards: &[Card], selection: &[(String, Vec<usize>)]) -> String {
     let mut out = String::from("# DOCKET\n\n## INDEX\n\n");
     for card in cards {
         let picked = selection.iter().find(|(name, _)| name == &card.name);
@@ -33,24 +58,6 @@ pub fn build_selection(cards: &[Card], selection: &[(String, Vec<usize>)]) -> St
             "{mark} {} [{}, {}d]{what}{partial}\n",
             card.name, card.status, card.age_days
         ));
-    }
-
-    out.push_str("\n## CARDS\n\n");
-    for card in cards {
-        let Some((_, chosen)) = selection.iter().find(|(name, _)| name == &card.name) else {
-            continue;
-        };
-        out.push_str(card.header().trim_end());
-        out.push_str("\n\n");
-
-        let outline = card.outline();
-        for index in 0..outline.nodes.len() {
-            if chosen.contains(&index) {
-                out.push_str(&outline.text_of(index));
-                out.push('\n');
-            }
-        }
-        out.push_str("---\n\n");
     }
     out
 }

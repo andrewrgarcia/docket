@@ -6,16 +6,18 @@
 
 mod brief;
 mod card;
+mod checkbox;
 mod cli;
+mod clipboard;
 mod commands;
 mod derive;
 mod editor;
 mod error;
 mod id;
 mod outline;
+mod pack;
 mod pick;
 mod store;
-mod checkbox;
 mod theme;
 mod ui;
 

@@ -22,8 +22,8 @@ First release. The binary is `dk`.
   tree, selectable at card, section or sub-heading level, a README's own
   structure included. Mouse
   support, per-row token cost with heat colouring, per-card completion,
-  `t` to tick a checkbox straight into the card, `e` to edit and return,
-  `N`/`X`/`R` to take one section across every card.
+  and `c` / `p` / `z` to copy, print or pack the selection. The key legend
+  shrinks to fit a narrow terminal rather than being cut off.
 - Checkboxes: `[ ]` / `[x]` lines in a card's own sections are recognised,
   tallied in the list, coloured in the editor, and ticked with Space in the
   editor's command mode. Tab and Shift-Tab jump between them.

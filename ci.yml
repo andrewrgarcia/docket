@@ -1,0 +1,51 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+# What CI is for here: does it build, do the tests pass, on the three
+# platforms people will install it on. Style is not a build failure — no
+# `cargo fmt --check`, no `clippy -D warnings`. A red badge should mean
+# something is broken, not that a line is 101 characters long.
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --all-targets
+
+  # The lints that catch real mistakes: correctness, suspicious code, and
+  # anything that can panic or lose data at runtime. Style lints are off.
+  # This job reports; it does not gate.
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: >
+          cargo clippy --all-targets --
+          -D clippy::correctness
+          -D clippy::suspicious
+          -W clippy::unwrap_used
+          -W clippy::expect_used
+          -W clippy::indexing_slicing
+          -A clippy::style
+          -A clippy::pedantic
+          -A clippy::complexity
+

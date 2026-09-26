@@ -44,11 +44,18 @@ pub fn inspect(dir: &Path) -> Derived {
         .find_map(|(file, syntax, section)| read(&dir.join(file), *syntax, section));
 
     let (name, what) = manifest.unwrap_or_default();
+    // With no manifest, the directory is the best name we have for deciding
+    // whether a README's first line is just the project's own title.
+    let label = if name.is_empty() {
+        dir.file_name().and_then(|s| s.to_str()).unwrap_or_default().to_string()
+    } else {
+        name.clone()
+    };
 
     Derived {
         name,
         what: if what.is_empty() {
-            readme_tagline(dir).unwrap_or_default()
+            readme_tagline(dir, &label).unwrap_or_default()
         } else {
             what
         },
@@ -122,18 +129,117 @@ fn field(text: &str, key: &str, separator: char) -> Option<String> {
     clean(value)
 }
 
-/// The first prose line of a README, skipping headings, badges and blank space.
-fn readme_tagline(dir: &Path) -> Option<String> {
+/// The first line of a README that reads like a description of the project.
+///
+/// A README opens with anything: a centred logo, a badge row, an HTML block,
+/// a title, a blockquote warning. The first line that is none of those, is
+/// prose rather than markup, and is not just the project's own name is the
+/// closest thing to a one-line summary the file has. Markdown is stripped,
+/// because this lands in a table, and `[Next.js](https://nextjs.org)` in a
+/// table column is noise.
+fn readme_tagline(dir: &Path, name: &str) -> Option<String> {
     let text = README_FILES
         .iter()
         .find_map(|name| fs::read_to_string(dir.join(name)).ok())?;
-    text.lines()
-        .map(str::trim)
-        .filter(|l| !l.is_empty())
-        .filter(|l| !l.starts_with('#') && !l.starts_with('<') && !l.starts_with("[!["))
-        .map(|l| l.trim_matches('*').trim())
-        .find(|l| l.len() > 10)
-        .map(|l| truncate(l, 100))
+
+    let mut fence: Option<usize> = None;
+    for raw in text.lines() {
+        let line = raw.trim();
+
+        // Code blocks are never a description.
+        let ticks = line.chars().take_while(|c| *c == '`').count();
+        if ticks >= 3 {
+            fence = if fence.is_some() { None } else { Some(ticks) };
+            continue;
+        }
+        if fence.is_some() || line.is_empty() {
+            continue;
+        }
+        // Headings, HTML, badges, quotes, lists, tables, rules, front matter.
+        if line.starts_with('#')
+            || line.starts_with('<')
+            || line.starts_with('>')
+            || line.starts_with('|')
+            || line.starts_with("- ")
+            || line.starts_with("* ")
+            || line.starts_with("---")
+            || line.starts_with("===")
+        {
+            continue;
+        }
+
+        let plain = strip_markdown(line);
+        // Too short to be a sentence, or the project's name again.
+        if plain.chars().count() < 12 || plain.to_ascii_lowercase() == name.to_ascii_lowercase() {
+            continue;
+        }
+        // What is left after stripping links and images is what we keep; a
+        // line that was mostly markup leaves little behind and is skipped.
+        if plain.chars().count() * 2 < line.chars().count() {
+            continue;
+        }
+        return Some(truncate(&plain, 100));
+    }
+    None
+}
+
+/// Inline markdown to plain text: link and image text without their targets,
+/// no emphasis marks, no inline code ticks. Deliberately not a parser — this
+/// is a table cell, and the worst case is a slightly odd sentence.
+fn strip_markdown(line: &str) -> String {
+    let mut out = String::with_capacity(line.len());
+    let mut chars = line.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        match c {
+            // `![alt](src)` — drop the image entirely, alt text included.
+            '!' if chars.peek() == Some(&'[') => {
+                chars.next();
+                for c in chars.by_ref() {
+                    if c == ']' {
+                        break;
+                    }
+                }
+                skip_target(&mut chars);
+            }
+            // `[text](url)` — keep the text, drop the url.
+            '[' => {
+                for c in chars.by_ref() {
+                    if c == ']' {
+                        break;
+                    }
+                    out.push(c);
+                }
+                skip_target(&mut chars);
+            }
+            '*' | '_' | '`' => {}
+            c => out.push(c),
+        }
+    }
+
+    // Collapse the whitespace the stripping leaves behind.
+    out.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Consume a `(...)` target, if one follows.
+fn skip_target(chars: &mut std::iter::Peekable<std::str::Chars<'_>>) {
+    if chars.peek() != Some(&'(') {
+        return;
+    }
+    chars.next();
+    let mut depth = 1;
+    for c in chars.by_ref() {
+        match c {
+            '(' => depth += 1,
+            ')' => {
+                depth -= 1;
+                if depth == 0 {
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
 }
 
 fn clean(value: &str) -> Option<String> {
@@ -143,10 +249,11 @@ fn clean(value: &str) -> Option<String> {
         .trim()
         .trim_matches('"')
         .trim();
+    let v = strip_markdown(v);
     if v.is_empty() {
         None
     } else {
-        Some(truncate(v, 100))
+        Some(truncate(&v, 100))
     }
 }
 
@@ -237,6 +344,96 @@ mod tests {
         let found = inspect(&dir);
         assert!(found.name.is_empty());
         assert_eq!(found.what, "A tool that does the thing.");
+    }
+
+    #[test]
+    fn links_and_emphasis_are_stripped_from_the_description() {
+        let dir = scratch("markdown");
+        fs::write(
+            dir.join("README.md"),
+            "# prince\n\nThis is a [Next.js](https://nextjs.org/) project, **bootstrapped** fast.\n",
+        )
+        .unwrap();
+        assert_eq!(
+            inspect(&dir).what,
+            "This is a Next.js project, bootstrapped fast."
+        );
+    }
+
+    #[test]
+    fn an_html_masthead_and_a_blockquote_are_skipped() {
+        let dir = scratch("html");
+        fs::write(
+            dir.join("README.md"),
+            "<p align=\"center\">\n<img src=\"logo.png\"/>\n</p>\n\n<h1>FUR</h1>\n\n\
+             > **Security notice.** Something urgent.\n\n\
+             FUR is a command-line system for archiving AI chats.\n",
+        )
+        .unwrap();
+        assert_eq!(
+            inspect(&dir).what,
+            "FUR is a command-line system for archiving AI chats."
+        );
+    }
+
+    #[test]
+    fn a_line_that_is_only_the_project_name_is_not_a_description() {
+        let dir = scratch("name-echo");
+        fs::write(dir.join("Cargo.toml"), "[package]\nname = \"macrogym\"\n").unwrap();
+        fs::write(
+            dir.join("README.md"),
+            "macrogym\n\nCounterfactual model selection for macroeconomics.\n",
+        )
+        .unwrap();
+        assert_eq!(
+            inspect(&dir).what,
+            "Counterfactual model selection for macroeconomics."
+        );
+    }
+
+    #[test]
+    fn a_code_fence_is_never_the_description() {
+        let dir = scratch("fence");
+        fs::write(
+            dir.join("README.md"),
+            "# thing\n\n```bash\ncargo install thing --locked --force\n```\n\nDoes the thing well.\n",
+        )
+        .unwrap();
+        assert_eq!(inspect(&dir).what, "Does the thing well.");
+    }
+
+    #[test]
+    fn a_mostly_markup_line_is_skipped() {
+        let dir = scratch("markup");
+        fs::write(
+            dir.join("README.md"),
+            "[docs](https://example.com/very/long/path/to/documentation/page)\n\n\
+             A real sentence about the project.\n",
+        )
+        .unwrap();
+        assert_eq!(inspect(&dir).what, "A real sentence about the project.");
+    }
+
+    #[test]
+    fn bullet_lists_and_tables_are_not_descriptions() {
+        let dir = scratch("lists");
+        fs::write(
+            dir.join("README.md"),
+            "# thing\n\n- first bullet point here\n| a | b |\n\nThe actual summary line.\n",
+        )
+        .unwrap();
+        assert_eq!(inspect(&dir).what, "The actual summary line.");
+    }
+
+    #[test]
+    fn a_manifest_description_is_stripped_too() {
+        let dir = scratch("manifest-md");
+        fs::write(
+            dir.join("Cargo.toml"),
+            "[package]\nname = \"x\"\ndescription = \"A **fast** [tool](https://x.dev) for things\"\n",
+        )
+        .unwrap();
+        assert_eq!(inspect(&dir).what, "A fast tool for things");
     }
 
     #[test]

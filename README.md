@@ -6,16 +6,17 @@ One folder of markdown files. No database, no daemon, no config. The command
 is `dk`.
 
 ```
-  HASH  NAME           STATUS    AGE  DONE      WHAT
-  a43b  moxi           active     3d  ▰▰▰▱ 3/4  semantic spatial description language
-  7f20  yggdrasil-cli  active     9d  ▰▰▰▰ 4/4  project flattener and diff engine
-  c118  kol-game       idea     142d  ▰▱▱▱ 1/4  retro whimsical browser game
-  0e94  membrane       dead     201d  ▱▱▱▱ 0/4  replaced by docket
+  HASH  NAME                STATUS    AGE  DONE      WHAT
+  a43b  moxi                active     3d  ▰▰▰▱ 3/4  semantic spatial description language
+  7f20  yggdrasil-cli       active     9d  ▰▰▰▰ 4/4  project flattener and diff engine
+  eab2  flashcall           stable    13d  ▰▰▰▰ 4/4  high-visibility calling interface for seniors
+  d8fe  the-fractal-prince  active   145d  ▱▱▱▱ 0/4  side-scrolling recursive platformer
+  0e94  membrane            dead     201d  ▱▱▱▱ 0/4  replaced by docket
 
-4 cards
+5 cards · 1 untouched 90d+ · 11/20 sections written · ~34k tokens
 ```
 
-`142d` is the point. You forgot about that one.
+`145d` is the point. You forgot about that one.
 
 **AGE** is days since you last touched the project — for a git repository,
 the last commit or staged change; for anything else, the last time the card
@@ -23,11 +24,20 @@ was edited. docket's own rewrites never count, so `sync` cannot make a
 forgotten project look fresh.
 
 **DONE** is how much of the card you have actually written: sections with
-something in them over sections in total. An idea you jotted and abandoned
-shows `▱▱▱▱ 0/4` and says so at a glance.
+something in them over sections in total. A project you registered and never
+came back to shows `▱▱▱▱ 0/4` and says so at a glance.
+
+**STATUS** is a word, not a menu. `active`, `idea`, `paused`, `done` and
+`dead` get a colour and a place in the sort order — done and dead sink to the
+bottom and print dim — and anything else you write, `stable` or `shipped` or
+`blocked`, is kept and shown as you wrote it.
+
+The line under the table counts what the table cannot: how many projects have
+gone untouched for a quarter, how much of your cards is actually filled in,
+and what sending the lot would cost in tokens.
 
 Every card has an eight-character hash, fixed for its lifetime, and answers to
-any unambiguous prefix of it: `dk a43b`, `dk show 7f2`. The column shows the
+any unambiguous prefix of it: `dk a43b`, `dk show d8f`. The column shows the
 shortest prefix that is currently unique. Names work too — `dk moxi` — and an
 exact name always wins over a hash prefix, so a card called `face` or `abed` is
 never shadowed by hex.
@@ -62,6 +72,7 @@ is `dk` — two letters, because you will type it a lot.
 
 ```markdown
 # moxi
+id: a43b21c0
 status: active
 what: semantic spatial description language
 path: /home/andrew/code/moxi
@@ -90,9 +101,6 @@ Field lines above the first `##`, then whatever you type. Prose, lists,
 GitHub checklist syntax, so the card renders correctly anywhere. The README always
 sits last, because the hand-written sections are what you came for and the
 README is reference.
-
-Known statuses are `active`, `idea`, `paused`, `done` and `dead`; the last two
-sort to the bottom and print dim. Anything else is kept but shown as `-`.
 
 `dk add .` names the card after the project's own name — the `name` in
 `Cargo.toml`, `package.json` or `pyproject.toml` — falling back to the
@@ -140,17 +148,17 @@ model gets to see.
 ```
 ▦ dk pick  14 cards · 174 headings · ☑ 3/11
 
-▶ [~] ▾ docket-cli  133f  0/4              412 tok
-  [x] ├── ▸ now                              1 tok
-  [ ] ├── ▸ next                             1 tok
-  [ ] ├── ▸ open questions                   4 tok
-  [ ] ├── ▸ notes                            2 tok
-  [~] └── ▾ readme                        2.1k tok
-  [~]     └── ▾ docket                     2.1k tok
-  [ ]         ├── · The loop                112 tok
-  [x]         ├── · Install                  57 tok
-  [ ]         └── · Commands                208 tok
-  [ ] ▸ moxi  0003  4/4                      0 tok
+▶ [~] ▾ the-fractal-prince  d8fe  0/4         1.2k tok
+  [x] ├── ▸ now                                 1 tok
+  [ ] ├── ▸ next                                1 tok
+  [ ] ├── ▸ open questions                      4 tok
+  [ ] ├── ▸ notes                               2 tok
+  [~] └── ▾ readme                           1.2k tok
+  [~]     └── ▾ The Fractal Prince           1.2k tok
+  [ ]         ├── · How it plays              318 tok
+  [x]         ├── · Tech                      204 tok
+  [ ]         └── · Getting started            96 tok
+  [ ] ▸ moxi  0003  4/4                         0 tok
 
 ▦ 2 headings from 1 cards · 71 tok  → DOCKET.md
 ```

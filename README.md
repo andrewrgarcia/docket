@@ -253,11 +253,47 @@ of it.
 ## Where things live
 
 The platform data directory: `~/.local/share/docket`,
-`~/Library/Application Support/docket`, `%APPDATA%\docket`. Set `DOCKET_HOME`
-to move it, which is how you keep the store in a git repo or a synced folder.
+`~/Library/Application Support/docket`, `%APPDATA%\docket`. `dk where` prints
+it. Set `DOCKET_HOME` to move it.
 
-Nothing is ever written inside your projects. A card points at a path; it
-never touches it.
+It is a flat folder of markdown files, one per card, and nothing else. Nothing
+is ever written inside your projects — a card points at a path; it never
+touches it.
+
+## Keep the store in a private git repo
+
+Recommended, and the format was chosen for it.
+
+```bash
+mkdir -p ~/notes                     # the parent, not the target
+mv "$(dk where)" ~/notes/docket      # must not already exist, or mv nests it
+echo 'export DOCKET_HOME=~/notes/docket' >> ~/.bashrc
+cd ~/notes/docket && git init && git add -A && git commit -m "docket store"
+```
+
+`dk where` prints the current store, so that first move works wherever your
+platform put it. Open a new shell, or `source ~/.bashrc`, before running `dk`
+again.
+
+The cards are the only copy. There is no undo, `dk rm` is permanent, and `dk
+sync` rewrites the README section of every card it touches. Git turns all
+three from *gone* into one command back. And because a card is markdown and
+its hash never changes, `git log -p moxi.md` is a readable history of how you
+thought about that project over six months — which is the record docket
+exists to keep.
+
+Private rather than public: a card holds your open questions and your notes on
+unfinished work, plus absolute paths that show your directory layout. None of
+that is secret, but none of it is something you meant to publish either.
+
+docket never calls git. Committing is a decision, and a tool that quietly
+committed your half-written notes would be worse than one that does nothing.
+Expect one noisy commit the first time you run a new version, since the id
+backfill rewrites cards that predate it.
+
+**Don't use Dropbox or iCloud for this instead.** There is no locking, so two
+machines editing the same card produces a conflicted copy and no warning. Git
+gives you a conflict you can see.
 
 ## What docket is not
 

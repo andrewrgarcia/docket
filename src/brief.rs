@@ -8,9 +8,10 @@ use crate::card::Card;
 
 pub const DEFAULT_FILE: &str = "DOCKET.md";
 
-/// Section-level selection: `(card name, chosen section indices)`, indices
-/// into `Card::all_sections`. Each chosen card is written out header-first,
-/// because a `## now` with no card around it is unreadable.
+/// Outline-level selection: `(card name, chosen node indices)`, indices into
+/// `Card::outline().nodes`. Each chosen card is written header-first, because
+/// a `## now` with no card around it is unreadable, and chosen nodes are
+/// emitted in document order so a README's structure survives the trip.
 pub fn build_selection(cards: &[Card], selection: &[(String, Vec<usize>)]) -> String {
     let mut out = String::from("# DOCKET\n\n## INDEX\n\n");
     for card in cards {
@@ -18,10 +19,15 @@ pub fn build_selection(cards: &[Card], selection: &[(String, Vec<usize>)]) -> St
         let mark = if picked.is_some() { '*' } else { '-' };
         let what = if card.what.is_empty() { String::new() } else { format!(" {}", card.what) };
         let partial = match picked {
-            Some((_, chosen)) if chosen.len() < card.all_sections().len() => {
-                format!(" ({} of {} sections)", chosen.len(), card.all_sections().len())
+            Some((_, chosen)) => {
+                let total = card.outline().nodes.len();
+                if chosen.len() < total {
+                    format!(" ({} of {total} sections)", chosen.len())
+                } else {
+                    String::new()
+                }
             }
-            _ => String::new(),
+            None => String::new(),
         };
         out.push_str(&format!(
             "{mark} {} [{}, {}d]{what}{partial}\n",
@@ -36,19 +42,13 @@ pub fn build_selection(cards: &[Card], selection: &[(String, Vec<usize>)]) -> St
         };
         out.push_str(card.header().trim_end());
         out.push_str("\n\n");
-        for (index, (heading, lines)) in card.all_sections().into_iter().enumerate() {
-            if !chosen.contains(&index) {
-                continue;
-            }
-            out.push_str(&heading);
-            out.push('\n');
-            let body = lines.join("\n");
-            let body = body.trim_end();
-            if !body.is_empty() {
-                out.push_str(body);
+
+        let outline = card.outline();
+        for index in 0..outline.nodes.len() {
+            if chosen.contains(&index) {
+                out.push_str(&outline.text_of(index));
                 out.push('\n');
             }
-            out.push('\n');
         }
         out.push_str("---\n\n");
     }
@@ -139,6 +139,22 @@ mod tests {
         assert!(text.contains("## readme\ntheirs"));
         assert!(!text.contains("spans"), "unchosen sections stay out");
         assert!(text.contains("(2 of 3 sections)"), "the index says it is partial");
+    }
+
+    #[test]
+    fn a_readme_subsection_can_be_sent_without_the_whole_readme() {
+        let card = Card::parse(
+            "docket",
+            "# docket\nid: a\n\n## now\nx\n\n## readme\n\n# docket\n\n## Install\ncargo install\n\n## Commands\na table\n",
+            0,
+        );
+        let outline = card.outline();
+        let install = outline.nodes.iter().position(|n| n.title() == "Install").unwrap();
+        let text = build_selection(&[card], &[("docket".to_string(), vec![install])]);
+
+        assert!(text.contains("## Install\ncargo install"));
+        assert!(!text.contains("a table"), "its sibling stays behind");
+        assert!(!text.contains("## now"), "and so does the rest of the card");
     }
 
     #[test]

@@ -12,6 +12,7 @@ mod derive;
 mod editor;
 mod error;
 mod id;
+mod outline;
 mod pick;
 mod store;
 mod checkbox;

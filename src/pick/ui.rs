@@ -201,9 +201,9 @@ fn on_key(picker: &mut Picker, rows: &[Row], key: KeyEvent, flash: &mut Option<S
 
         KeyCode::Char('a') => picker.select_all(),
         KeyCode::Char('n') => picker.select_none(),
-        KeyCode::Char('N') => picker.select_heading("## now"),
-        KeyCode::Char('X') => picker.select_heading("## next"),
-        KeyCode::Char('R') => picker.select_heading("## readme"),
+        KeyCode::Char('N') => picker.select_heading("now"),
+        KeyCode::Char('X') => picker.select_heading("next"),
+        KeyCode::Char('R') => picker.select_heading("readme"),
 
         KeyCode::Char('*') => picker.toggle_all_folds(),
         KeyCode::Char('o') => picker.expand_cards(),
@@ -218,8 +218,8 @@ fn parent_of(rows: &[Row], index: usize) -> Option<usize> {
     let row = rows.get(index)?;
     let want = match row.kind {
         Kind::Card => return None,
-        Kind::Section { .. } => Kind::Card,
-        Kind::Line { section, .. } => Kind::Section { index: section },
+        Kind::Node { .. } => Kind::Card,
+        Kind::Line { node, .. } => Kind::Node { index: node },
     };
     rows[..index]
         .iter()
@@ -286,7 +286,7 @@ fn draw(picker: &mut Picker, rows: &[Row], flash: Option<&str>, out: &mut impl W
         ResetColor,
         Print("  "),
         SetForegroundColor(MUTED),
-        Print(format!("{cards} cards · {sections} sections · ☑ {ticked}/{boxes}")),
+        Print(format!("{cards} cards · {sections} headings · ☑ {ticked}/{boxes}")),
         ResetColor,
         MoveTo(0, 1),
         Clear(ClearType::UntilNewLine),
@@ -331,7 +331,13 @@ fn draw(picker: &mut Picker, rows: &[Row], flash: Option<&str>, out: &mut impl W
                     out,
                     SetForegroundColor(CYAN),
                     SetAttribute(Attribute::Bold),
-                    Print(if row.expanded { "▾ " } else { "▸ " }),
+                    Print(if !row.foldable {
+                        "· "
+                    } else if row.expanded {
+                        "▾ "
+                    } else {
+                        "▸ "
+                    }),
                     Print(&row.text),
                     SetAttribute(Attribute::Reset),
                     ResetColor,
@@ -340,13 +346,25 @@ fn draw(picker: &mut Picker, rows: &[Row], flash: Option<&str>, out: &mut impl W
                     ResetColor,
                 )?;
             }
-            Kind::Section { .. } => queue!(
-                out,
-                SetForegroundColor(AMBER),
-                Print(if row.expanded { "▾ " } else { "▸ " }),
-                Print(&row.text),
-                ResetColor,
-            )?,
+            // A card's own section is amber; anything nested inside one came
+            // from a README and is drawn cooler, so the two never blur.
+            Kind::Node { .. } => {
+                let nested = row.depth > 0;
+                let marker = if !row.foldable {
+                    "· "
+                } else if row.expanded {
+                    "▾ "
+                } else {
+                    "▸ "
+                };
+                queue!(
+                    out,
+                    SetForegroundColor(if nested { MUTED } else { AMBER }),
+                    Print(marker),
+                    Print(&row.text),
+                    ResetColor,
+                )?
+            }
             Kind::Line { .. } => match checkbox::find(&row.text) {
                 Some(mark) => queue!(
                     out,
@@ -400,7 +418,7 @@ fn draw(picker: &mut Picker, rows: &[Row], flash: Option<&str>, out: &mut impl W
         SetAttribute(Attribute::Bold),
         SetForegroundColor(heat(tokens)),
         Print(format!(
-            "▦ {picked_sections} sections from {picked_cards} cards · {} tok",
+            "▦ {picked_sections} headings from {picked_cards} cards · {} tok",
             human(tokens)
         )),
         ResetColor,

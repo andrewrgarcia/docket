@@ -134,54 +134,67 @@ everything else.
 ## Picking
 
 `dk pick` (alias `dk tree`) is the whole store as a fold-out tree with a
-checkbox beside every card and every section. It is where you decide what a
+checkbox beside every card and every heading. It is where you decide what a
 model gets to see.
 
 ```
-▦ dk pick  8 cards · 31 sections · ☑ 7/19
+▦ dk pick  14 cards · 174 headings · ☑ 3/11
 
-▶ [~] ▾ moxi        8073  3/4        412 tok
-  [x] ├── ▾ now                      118 tok
-      │   ├── □ M2 — errors that point at the span
-      │   └── ✓ M1 — parser keeps source spans
-  [x] ├── ▸ next                      64 tok
-  [ ] ├── ▸ open questions            21 tok
-  [ ] └── ▸ readme                  2.1k tok
-  [ ] ▸ strategy-arena  91c7  4/4    980 tok
-  [x] ▸ kol-game       c118  1/4      96 tok
+▶ [~] ▾ docket-cli  133f  0/4              412 tok
+  [x] ├── ▸ now                              1 tok
+  [ ] ├── ▸ next                             1 tok
+  [ ] ├── ▸ open questions                   4 tok
+  [ ] ├── ▸ notes                            2 tok
+  [~] └── ▾ readme                        2.1k tok
+  [~]     └── ▾ docket                     2.1k tok
+  [ ]         ├── · The loop                112 tok
+  [x]         ├── · Install                  57 tok
+  [ ]         └── · Commands                208 tok
+  [ ] ▸ moxi  0003  4/4                      0 tok
 
-▦ 3 sections from 2 cards · 278 tok  → DOCKET.md
+▦ 2 headings from 1 cards · 71 tok  → DOCKET.md
 ```
 
-Space picks the row under the cursor: a card takes all of it, a section takes
-just that section, and a line takes the section it belongs to. A card that is
-partly picked shows `[~]` and fills up when you press space on it. The README
-is a section like any other — usually the most expensive one, which is why it
-is worth being able to leave behind.
+A card's own sections are amber at the top level. Everything a README brought
+with it — its `#` title, its `##` headings, their `###` children — nests
+underneath in grey, as deep as the document goes.
 
-The token count on the right is what that row costs in context, coloured on
-the same thresholds `ygg` uses: grey under 200, green under 1k, amber under
-4k, red above. The footer totals what you have chosen, header lines included.
+**How the tree is worked out.** A card's sections are the unbroken run of
+level-2 headings starting at the first one. The run ends at the first heading
+that is not a fresh `##` — a `#` title, a `###`, or a repeat of one already
+used — and never resumes. That last rule is what keeps a README's own
+`## now` nested where it belongs instead of posing as a second section of the
+card. After the run, headings nest by depth. Headings inside fenced code
+blocks are not headings.
+
+Space takes the row under the cursor **and everything beneath it**: a card
+takes all of it, `## readme` takes the whole document, `## Install` takes its
+`### From source` too. Sending a heading without its children would be a
+quietly truncated document. A partly-taken row shows `[~]`.
+
+The token count on the right is what that row and its subtree cost, coloured
+on the same thresholds `ygg` uses: grey under 200, green under 1k, amber
+under 4k, red above. The footer totals the selection, card headers included.
 
 | key | |
 |---|---|
 | `↑↓` `jk`, mouse | move |
-| `space`, click the box | pick / unpick |
+| `space`, click the box | take / drop, with everything under it |
 | `enter` `→` `l`, click the row | open |
 | `←` `h` | close, or jump to the parent |
-| `o` | open every card to its headings |
+| `o` | open every card to its own sections |
 | `*` | open or shut everything |
 | `z` | collapse |
 | `t` | tick the checkbox on this line, written to the card at once |
-| `N` `X` `R` | pick every `now` / `next` / `readme`, across all cards |
-| `a` `n` | pick everything / nothing |
+| `N` `X` `R` | take every `now` / `next` / `readme` — card sections only |
+| `a` `n` | take everything / nothing |
 | `e` | edit this card, then come back |
 | `w` | write the file |
 | `q` `Esc` | leave |
 
-Picking a section writes the card's header with it, so `## now` never arrives
-without the card it belongs to. Nothing is remembered between runs — picking
-takes five seconds and a stale selection is worse than none.
+Picking a heading writes the card's header with it, so `## now` never arrives
+without the card it belongs to, and chosen headings are emitted in document
+order. Nothing is remembered between runs.
 
 `dk out` skips the screen and writes every card whole.
 

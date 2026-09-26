@@ -14,8 +14,13 @@ First release. The binary is `dk`.
   description, coloured and clipped to the terminal width. Age is days since
   the project's last git activity (or the card's last edit); docket's own
   rewrites preserve it.
+- Cards are parsed into a heading outline: the card's own sections are the
+  unbroken run of level-2 headings from the first one, and everything after
+  it — a README's title, headings and subheadings — nests by depth. Fenced
+  code blocks are not scanned for headings.
 - `dk pick` (aliases `dk p`, `dk tree`, `dk t`) — the store as a fold-out
-  tree, selectable at card *or* section level, README included. Mouse
+  tree, selectable at card, section or sub-heading level, a README's own
+  structure included. Mouse
   support, per-row token cost with heat colouring, per-card completion,
   `t` to tick a checkbox straight into the card, `e` to edit and return,
   `N`/`X`/`R` to take one section across every card.

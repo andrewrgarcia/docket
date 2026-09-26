@@ -56,13 +56,8 @@ fn render_table(cards: &[Card], width: usize, color: bool) -> String {
     // fill in over time, and this is the column that shames the empty ones.
     let filled: Vec<(usize, usize)> = cards.iter().map(Card::completion).collect();
     let any_sections = filled.iter().any(|(_, total)| *total > 0);
-    let done_w = "DONE".len().max(BAR + 4);
-    let name_w = cards
-        .iter()
-        .map(|c| c.name.chars().count())
-        .max()
-        .unwrap_or(4)
-        .max(4);
+    let done_w = if any_sections { "DONE".len().max(BAR + 4) } else { 0 };
+
     let status_w = cards
         .iter()
         .map(|c| c.status.as_str().len())
@@ -70,10 +65,15 @@ fn render_table(cards: &[Card], width: usize, color: bool) -> String {
         .unwrap_or(6)
         .max(6);
 
-    // hash + name + status + age (+ done), each followed by two spaces.
-    let used = 2 + hash_w + 2 + name_w + 2 + status_w + 2 + 5 + 2
-        + if any_sections { done_w + 2 } else { 0 };
-    let what_w = width.saturating_sub(used);
+    // Everything but the name and the description is fixed width. The name
+    // gets what it needs up to half the terminal, the description takes the
+    // rest, and both are clipped — a table that wraps stops being a table.
+    let fixed = 2 + hash_w + 2 + 2 + status_w + 2 + 5 + 2 + if any_sections { done_w + 2 } else { 0 };
+    let longest_name = cards.iter().map(|c| c.name.chars().count()).max().unwrap_or(4).max(4);
+    let name_w = longest_name
+        .min(width.saturating_sub(fixed + 4).max(4))
+        .min(width / 2);
+    let what_w = width.saturating_sub(fixed + name_w);
 
     let mut out = String::new();
     let done_head = if any_sections { format!("{:<done_w$}  ", "DONE") } else { String::new() };
@@ -82,7 +82,7 @@ fn render_table(cards: &[Card], width: usize, color: bool) -> String {
         &format!(
             "  {:<hash_w$}  {:<name_w$}  {:<status_w$}  {:>5}  {done_head}{}",
             "HASH",
-            "NAME",
+            clip("NAME", name_w),
             "STATUS",
             "AGE",
             clip("WHAT", what_w)
@@ -95,7 +95,7 @@ fn render_table(cards: &[Card], width: usize, color: bool) -> String {
         let cold = card.status.is_cold();
 
         let hash = ink(color, &pad(short, hash_w), &[DIM]);
-        let name = ink(color, &pad(&card.name, name_w), if cold { &[DIM] } else { &[BOLD] });
+        let name = ink(color, &pad(&clip(&card.name, name_w), name_w), if cold { &[DIM] } else { &[BOLD] });
         let status = ink(
             color,
             &pad(card.status.as_str(), status_w),

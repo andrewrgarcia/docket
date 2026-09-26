@@ -1,4 +1,6 @@
 use std::fmt;
+
+use crate::outline::{self, Outline};
 use std::path::Path;
 use std::time::SystemTime;
 
@@ -128,11 +130,6 @@ impl Card {
         self.id.clone()
     }
 
-    /// A rough token count for the picker's budget. Four characters per token
-    /// is the usual English approximation and is close enough to choose with.
-    pub fn tokens(&self) -> usize {
-        self.body.chars().count() / 4
-    }
 
     /// Everything above the first `##` heading: the title and the field
     /// lines. Written out with any selection, because a section with no card
@@ -147,38 +144,23 @@ impl Card {
             .to_string()
     }
 
-    /// Every `##` section including the README, for the picker. `sections`
-    /// stops at the README because completion is about what *you* wrote;
-    /// choosing what to send is a different question.
-    pub fn all_sections(&self) -> Vec<(String, Vec<String>)> {
-        let mut out: Vec<(String, Vec<String>)> = Vec::new();
-        for line in self.body.lines() {
-            let trimmed = line.trim_end();
-            if trimmed.starts_with("## ") {
-                out.push((trimmed.to_string(), Vec::new()));
-            } else if let Some((_, lines)) = out.last_mut() {
-                lines.push(line.to_string());
-            }
-        }
-        out
+    /// The card's headings as a tree: its own sections at the top, anything
+    /// a README brought with it nested underneath. See `outline.rs`.
+    pub fn outline(&self) -> Outline {
+        outline::parse(&self.body)
     }
 
-    /// The card's own `##` sections, in order, as `(heading, body lines)`.
-    /// The README is not one of them: it is the project's text, not yours.
+    /// The card's own sections, README excluded — it is the project's text,
+    /// not yours, and completion is about what you wrote.
     pub fn sections(&self) -> Vec<(String, Vec<String>)> {
-        let mut out: Vec<(String, Vec<String>)> = Vec::new();
-        for line in self.body.lines() {
-            let trimmed = line.trim_end();
-            if trimmed.starts_with("## ") {
-                if trimmed.eq_ignore_ascii_case(README_HEADING) {
-                    break;
-                }
-                out.push((trimmed.to_string(), Vec::new()));
-            } else if let Some((_, lines)) = out.last_mut() {
-                lines.push(line.to_string());
-            }
-        }
-        out
+        let outline = self.outline();
+        outline
+            .roots
+            .iter()
+            .map(|at| &outline.nodes[*at])
+            .take_while(|node| !node.heading.eq_ignore_ascii_case(README_HEADING))
+            .map(|node| (node.heading.clone(), node.lines.clone()))
+            .collect()
     }
 
     /// `(filled, total)` sections. A section counts as filled when it holds
@@ -370,16 +352,27 @@ mod tests {
     }
 
     #[test]
-    fn all_sections_includes_the_readme_and_header_stops_before_it() {
+    fn the_outline_holds_the_readme_and_sections_does_not() {
         let c = Card::parse(
             "x",
             "# x\nid: a\nstatus: active\n\n## now\nparser\n\n## readme\ntheirs\n",
             0,
         );
-        let all: Vec<String> = c.all_sections().into_iter().map(|(h, _)| h).collect();
-        assert_eq!(all, vec!["## now", "## readme"]);
+        let outline = c.outline();
+        let roots: Vec<&str> = outline.roots.iter().map(|i| outline.nodes[*i].title()).collect();
+        assert_eq!(roots, vec!["now", "readme"]);
         assert_eq!(c.sections().len(), 1, "completion ignores the readme");
         assert_eq!(c.header(), "# x\nid: a\nstatus: active");
+    }
+
+    #[test]
+    fn a_readme_heading_never_counts_towards_completion() {
+        let c = Card::parse(
+            "x",
+            "# x\nid: a\n\n## now\n\n## readme\n# theirs\n\n## Install\nsteps\n",
+            0,
+        );
+        assert_eq!(c.completion(), (0, 1), "one own section, empty");
     }
 
     #[test]
@@ -403,9 +396,4 @@ mod tests {
         assert_eq!(c.progress(), (1, 2));
     }
 
-    #[test]
-    fn tokens_are_estimated_from_length() {
-        let c = Card::parse("x", &"a".repeat(400), 0);
-        assert_eq!(c.tokens(), 100);
-    }
 }

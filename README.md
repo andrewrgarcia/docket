@@ -124,13 +124,14 @@ own: a card that rewrites itself is a card you stop trusting.
 | `dk` | the list |
 | `dk show <name>` | read a card (by name, hash, or a prefix of either) |
 | `dk edit <name>` | edit a card in the terminal |
-| `dk open [name]` | open a card in your desktop editor; no name opens the folder |
+| `dk code [name]` | open a card in VS Code; no name opens the whole store |
 | `dk add [path]` | new card; no path means an idea |
 | `dk sync [name]` | re-read project READMEs into their cards |
 | `dk pick` | browse, choose sections, write `DOCKET.md` (alias `dk tree`) |
 | `dk out` | write every card to `DOCKET.md` |
 | `dk rename <old> <new>` | rename a card, heading and all |
 | `dk rm <name>` | delete, after you type the name back |
+| `dk where` | print the store path |
 
 `--out <file>` sends `pick` or `out` somewhere other than `DOCKET.md`. That is
 the only flag. An unrecognised word is treated as a card name, so `dk moxi`
@@ -233,11 +234,13 @@ shape of a card is visible at a glance. Saves are atomic — written beside the
 card and renamed into place — so an interrupted save leaves the old card
 intact.
 
-`dk open moxi` hands the file to whatever your desktop opens markdown with —
-gedit, TextEdit, VS Code, Typora. `xdg-open` on Linux, `open` on macOS,
-`start` on Windows, with `gio`, `kde-open` and `wslview` as fallbacks. Set
-`DOCKET_OPENER` to name a program yourself. `dk open` with no card opens the
-store folder in your file manager.
+`dk code moxi` opens the card in VS Code. `dk code` with no card opens the
+whole store as a folder, which is the better one most days: every card in one
+sidebar, with search and multi-file edit across all of them.
+
+It tries `code`, `codium`, `cursor`, `windsurf` and `code-insiders`, in that
+order. `DOCKET_CODE` names something else — it takes arguments, so
+`DOCKET_CODE="subl -n"` works.
 
 Set `DOCKET_EDITOR`, `VISUAL` or `EDITOR` (checked in that order) to use your
 own editor for `dk edit` instead. `EDITOR="code --wait"` works; the `--wait` matters, or the

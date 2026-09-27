@@ -314,17 +314,16 @@ fn every_card_gets_a_hash_and_answers_to_it() {
 }
 
 #[test]
-fn open_reports_when_no_desktop_opener_exists() {
+fn code_reports_when_no_editor_is_installed() {
     let s = Sandbox::new();
     s.card("moxi", "# moxi\nstatus: active\n");
 
-    // A opener that cannot be spawned stands in for a headless machine.
     let out = Command::new(env!("CARGO_BIN_EXE_dk"))
-        .args(["open", "moxi"])
+        .args(["code", "moxi"])
         .current_dir(&s.scratch)
         .env("DOCKET_HOME", &s.home)
         .env("NO_COLOR", "1")
-        .env("DOCKET_OPENER", "definitely-not-an-opener-42")
+        .env("DOCKET_CODE", "definitely-not-an-editor-42")
         .output()
         .unwrap();
     assert!(!out.status.success());
@@ -332,20 +331,41 @@ fn open_reports_when_no_desktop_opener_exists() {
 }
 
 #[test]
-fn open_uses_the_configured_opener() {
+fn code_uses_the_configured_editor_and_names_the_file() {
     let s = Sandbox::new();
     s.card("moxi", "# moxi\nstatus: active\n");
-    let opener = if cfg!(windows) { "cmd /c exit 0" } else { "true" };
+    let editor = if cfg!(windows) { "cmd /c exit 0" } else { "true" };
+
     let out = Command::new(env!("CARGO_BIN_EXE_dk"))
-        .args(["open", "moxi"])
+        .args(["code", "moxi"])
         .current_dir(&s.scratch)
         .env("DOCKET_HOME", &s.home)
         .env("NO_COLOR", "1")
-        .env("DOCKET_OPENER", opener)
+        .env("DOCKET_CODE", editor)
         .output()
         .unwrap();
     assert!(out.status.success(), "{}", err(&out));
-    assert!(String::from_utf8_lossy(&out.stdout).contains("opened"));
+    assert!(String::from_utf8_lossy(&out.stdout).contains("moxi.md"));
+}
+
+#[test]
+fn code_with_no_card_opens_the_store_folder() {
+    let s = Sandbox::new();
+    s.card("moxi", "# moxi\nstatus: active\n");
+    let editor = if cfg!(windows) { "cmd /c exit 0" } else { "true" };
+
+    let out = Command::new(env!("CARGO_BIN_EXE_dk"))
+        .args(["code"])
+        .current_dir(&s.scratch)
+        .env("DOCKET_HOME", &s.home)
+        .env("NO_COLOR", "1")
+        .env("DOCKET_CODE", editor)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", err(&out));
+    let printed = String::from_utf8_lossy(&out.stdout);
+    assert!(printed.contains(s.home.to_str().unwrap()), "{printed}");
+    assert!(!printed.contains(".md"), "the folder, not a card: {printed}");
 }
 
 #[test]
@@ -440,4 +460,11 @@ fn unknown_flags_are_usage_errors() {
 fn a_missing_card_exits_three() {
     let s = Sandbox::new();
     assert_eq!(s.run(&["ghost"]).status.code(), Some(3));
+}
+
+#[test]
+fn where_prints_the_store_path() {
+    let s = Sandbox::new();
+    let printed = s.stdout(&["where"]);
+    assert_eq!(printed.trim(), s.home.to_string_lossy());
 }

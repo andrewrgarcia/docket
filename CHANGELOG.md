@@ -30,9 +30,9 @@ First release. The binary is `dk`.
 - A stable eight-character hash per card, written into the file at `add` and
   backfilled for older cards. Any card can be addressed by name, by hash, or
   by an unambiguous prefix of either; an exact name always wins.
-- `dk open [name]` — open a card in the desktop's own editor, or the store
-  folder when no card is named. `DOCKET_OPENER` overrides the platform
-  default.
+- `dk code [name]` — open a card in VS Code, or the whole store as a folder
+  when no card is named. Tries `code`, `codium`, `cursor`, `windsurf` and
+  `code-insiders`; `DOCKET_CODE` overrides.
 - `dk add [path]` — register a project or create an idea. Names the card from
   the manifest's own `name`, derives `what` from its description or the
   README's first prose line, notes an `AGENTS.md`, and captures the whole

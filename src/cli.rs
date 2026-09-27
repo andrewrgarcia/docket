@@ -6,7 +6,7 @@ dk — every project and idea you have, in one list.
   dk                    the list
   dk show <name>        read a card
   dk edit <name>        edit a card here in the terminal
-  dk open [name]        open a card in your desktop editor (no name: the folder)
+  dk code [name]        open a card in VS Code (no name: the whole store)
   dk add [path]         new card; no path means an idea
   dk sync [name]        re-read project READMEs into their cards
   dk pick               browse and choose what to send, write DOCKET.md
@@ -14,6 +14,7 @@ dk — every project and idea you have, in one list.
   dk out                write every card to DOCKET.md
   dk rename <old> <new> rename a card
   dk rm <name>          delete a card
+  dk where              print the store path
 
   --out <file>           with pick or out: write somewhere else
 
@@ -26,7 +27,8 @@ pub enum Command {
     List,
     Show(String),
     Edit(String),
-    Open(Option<String>),
+    Code(Option<String>),
+    Where,
     Add(Option<String>),
     Sync(Option<String>),
     Pick { out: Option<String> },
@@ -62,7 +64,8 @@ where
         "-V" | "--version" => Ok(Command::Version),
         "show" => Ok(Command::Show(one("show <name>")?)),
         "edit" => Ok(Command::Edit(one("edit <name>")?)),
-        "open" => Ok(Command::Open(operands.first().cloned())),
+        "code" => Ok(Command::Code(operands.first().cloned())),
+        "where" => Ok(Command::Where),
         "add" => Ok(Command::Add(operands.first().cloned())),
         "sync" => Ok(Command::Sync(operands.first().cloned())),
         "pick" | "p" | "tree" | "t" => Ok(Command::Pick { out }),
@@ -139,9 +142,14 @@ mod tests {
     }
 
     #[test]
-    fn open_takes_an_optional_name() {
-        assert_eq!(parse_words("open").unwrap(), Command::Open(None));
-        assert_eq!(parse_words("open moxi").unwrap(), Command::Open(Some("moxi".into())));
+    fn where_is_its_own_verb_not_a_card_name() {
+        assert_eq!(parse_words("where").unwrap(), Command::Where);
+    }
+
+    #[test]
+    fn code_takes_an_optional_name() {
+        assert_eq!(parse_words("code").unwrap(), Command::Code(None));
+        assert_eq!(parse_words("code moxi").unwrap(), Command::Code(Some("moxi".into())));
     }
 
     #[test]

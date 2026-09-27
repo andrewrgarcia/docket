@@ -6,7 +6,6 @@ mod out;
 mod remove;
 mod rename;
 mod show;
-mod sync;
 
 use crate::cli::{Command, HELP};
 use crate::error::Result;
@@ -36,7 +35,6 @@ pub fn dispatch(command: Command) -> Result<()> {
         Command::Code(Some(name)) => code::card(&Store::open()?, &name),
         Command::Code(None) => code::store_dir(&Store::open()?),
         Command::Add(path) => add::run(&Store::open()?, path.as_deref()),
-        Command::Sync(name) => sync::run(&Store::open()?, name.as_deref()),
         Command::Pick { out } => out::picked(&Store::open()?, out.as_deref()),
         Command::Out { out } => out::all(&Store::open()?, out.as_deref()),
         Command::Rename { from, to } => rename::run(&Store::open()?, &from, &to),

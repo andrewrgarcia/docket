@@ -95,39 +95,7 @@ fn empty_store_points_at_the_next_step() {
 }
 
 #[test]
-fn add_captures_the_whole_readme_as_the_last_section() {
-    let s = Sandbox::new();
-    let readme = "# fur\n\nA local-first diary.\n\n## Install\n\ncargo install fur-cli\n";
-    let dir = s.project(
-        "cli",
-        &[
-            ("Cargo.toml", "[package]\nname = \"fur-cli\"\ndescription = \"a diary\"\n"),
-            ("README.md", readme),
-        ],
-    );
-
-    let printed = s.stdout(&["add", dir.to_str().unwrap()]);
-    assert!(printed.contains("fur-cli"), "{printed}");
-    assert!(printed.contains("README captured"), "{printed}");
-
-    let card = s.read("fur-cli");
-    assert!(card.contains("cargo install fur-cli"), "readme body missing");
-    let readme_at = card.find("## readme").expect("readme section");
-    for section in ["## now", "## next", "## open questions", "## notes"] {
-        assert!(card.find(section).unwrap() < readme_at, "{section} after readme");
-    }
-}
-
-#[test]
-fn a_project_without_a_readme_gets_no_readme_section() {
-    let s = Sandbox::new();
-    let dir = s.project("bare", &[("Cargo.toml", "[package]\nname = \"bare\"\n")]);
-    s.stdout(&["add", dir.to_str().unwrap()]);
-    assert!(!s.read("bare").contains("## readme"));
-}
-
-#[test]
-fn sync_refreshes_the_readme_and_leaves_notes_alone() {
+fn add_links_the_readme_and_output_reads_it_live() {
     let s = Sandbox::new();
     let dir = s.project(
         "moxi",
@@ -136,45 +104,76 @@ fn sync_refreshes_the_readme_and_leaves_notes_alone() {
             ("README.md", "# moxi\n\nFirst version.\n"),
         ],
     );
+    let printed = s.stdout(&["add", dir.to_str().unwrap()]);
+    assert!(printed.contains("readme →"), "{printed}");
+
+    let card = s.read("moxi");
+    assert!(card.contains("readme: "), "{card}");
+    assert!(!card.contains("First version."), "the card links, it does not copy");
+
+    // Change the README; the next brief carries the new text with no sync.
+    fs::write(dir.join("README.md"), "# moxi\n\nSecond version.\n").unwrap();
+    s.stdout(&["out"]);
+    let written = fs::read_to_string(s.scratch.join("DOCKET.md")).unwrap();
+    assert!(written.contains("Second version."), "{written}");
+    assert!(!written.contains("First version."));
+}
+
+#[test]
+fn show_prints_the_linked_readme_with_the_card() {
+    let s = Sandbox::new();
+    let dir = s.project("thing", &[("README.md", "# thing\n\nThe readme body.\n")]);
     s.stdout(&["add", dir.to_str().unwrap()]);
 
-    // The user writes a note, then the project's README moves on.
-    let card = s.read("moxi").replace("## now\n", "## now\nparser work\n");
-    fs::write(s.home.join("moxi.md"), card).unwrap();
-    fs::write(dir.join("README.md"), "# moxi\n\nSecond version.\n").unwrap();
-
-    let printed = s.stdout(&["sync"]);
-    assert!(printed.contains("updated"), "{printed}");
-
-    let body = s.read("moxi");
-    assert!(body.contains("Second version."));
-    assert!(!body.contains("First version."));
-    assert!(body.contains("## now\nparser work"), "notes lost: {body}");
-    assert_eq!(body.matches("## readme").count(), 1);
+    let shown = s.stdout(&["show", "thing"]);
+    assert!(shown.contains("## now"), "the card's own sections");
+    assert!(shown.contains("The readme body."), "and the linked file");
 }
 
 #[test]
-fn sync_skips_ideas_and_vanished_paths() {
+fn a_missing_readme_is_reported_rather_than_dropped() {
     let s = Sandbox::new();
-    s.card("an-idea", "# an-idea\nstatus: idea\nwhat: someday\n");
-    s.card("gone", "# gone\nstatus: active\npath: /nowhere/at/all\n");
-    let printed = s.stdout(&["sync"]);
-    assert!(printed.contains("no path"), "{printed}");
-    assert!(printed.contains("path is gone"), "{printed}");
-    assert!(printed.contains("0 updated"), "{printed}");
+    s.card(
+        "gone",
+        "# gone\nstatus: active\npath: /nowhere\nreadme: /nowhere/README.md\n\n## now\nx\n",
+    );
+    let shown = s.stdout(&["show", "gone"]);
+    assert!(shown.contains("no README at /nowhere/README.md"), "{shown}");
 }
 
 #[test]
-fn show_prints_the_card_verbatim_when_piped() {
+fn an_embedded_readme_is_migrated_to_a_link() {
     let s = Sandbox::new();
-    // With an id already present, nothing is backfilled and the file that
-    // comes back out is byte-for-byte the file that went in.
-    let body = "# moxi\nid: a43b21c0\nstatus: active\nwhat: a language\n\n## now\nparser\n";
-    s.card("moxi", body);
-    assert_eq!(s.stdout(&["show", "moxi"]), body);
-    // A bare name is the same thing.
-    assert_eq!(s.stdout(&["moxi"]), body);
+    let dir = s.project("old", &[("README.md", "# old\n\nThe real readme.\n")]);
+    // A card in the pre-link format: a copy of the README inside it.
+    s.card(
+        "old",
+        &format!(
+            "# old\nstatus: active\npath: {}\n\n## now\nmy note\n\n## readme\n\n# old\n\nA stale copy.\n",
+            dir.display()
+        ),
+    );
+
+    s.stdout(&[]); // any command triggers the one-time migration
+
+    let card = s.read("old");
+    assert!(card.contains("readme: "), "{card}");
+    assert!(!card.contains("A stale copy."), "the copy is dropped");
+    assert!(card.contains("## now\nmy note"), "the notes survive");
+    assert!(s.stdout(&["show", "old"]).contains("The real readme."));
 }
+
+
+#[test]
+fn a_project_without_a_readme_links_nothing() {
+    let s = Sandbox::new();
+    let dir = s.project("bare", &[("Cargo.toml", "[package]\nname = \"bare\"\n")]);
+    s.stdout(&["add", dir.to_str().unwrap()]);
+    let card = s.read("bare");
+    assert!(!card.contains("readme:"), "{card}");
+    assert!(!card.contains("## readme"));
+}
+
 
 #[test]
 fn show_includes_an_id_the_store_had_to_backfill() {

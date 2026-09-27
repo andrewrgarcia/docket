@@ -23,7 +23,7 @@ pub fn build_selection(cards: &[Card], selection: &[(String, Vec<usize>)]) -> St
         out.push_str(card.header().trim_end());
         out.push_str("\n\n");
 
-        let outline = card.outline();
+        let outline = card.full_outline();
         for index in 0..outline.nodes.len() {
             if chosen.contains(&index) {
                 out.push_str(&outline.text_of(index));
@@ -45,7 +45,7 @@ pub fn index_only(cards: &[Card], selection: &[(String, Vec<usize>)]) -> String 
         let what = if card.what.is_empty() { String::new() } else { format!(" {}", card.what) };
         let partial = match picked {
             Some((_, chosen)) => {
-                let total = card.outline().nodes.len();
+                let total = card.full_outline().nodes.len();
                 if chosen.len() < total {
                     format!(" ({} of {total} sections)", chosen.len())
                 } else {
@@ -62,34 +62,18 @@ pub fn index_only(cards: &[Card], selection: &[(String, Vec<usize>)]) -> String 
     out
 }
 
-/// `chosen` empty means every card, whole.
+/// Every card, whole — `dk out`.
+///
+/// Expressed as a selection of everything so there is exactly one code path
+/// that turns cards into a brief. Writing `card.body` directly here is what
+/// made `out` the one command that missed a linked README.
 pub fn build(cards: &[Card], chosen: &[String]) -> String {
-    let picked: Vec<&Card> = if chosen.is_empty() {
-        cards.iter().collect()
-    } else {
-        cards.iter().filter(|c| chosen.contains(&c.name)).collect()
-    };
-
-    let mut out = String::from("# DOCKET\n\n## INDEX\n\n");
-    for card in cards {
-        let mark = if picked.iter().any(|p| p.name == card.name) { '*' } else { '-' };
-        let what = if card.what.is_empty() {
-            String::new()
-        } else {
-            format!(" {}", card.what)
-        };
-        out.push_str(&format!(
-            "{mark} {} [{}, {}d]{}\n",
-            card.name, card.status, card.age_days, what
-        ));
-    }
-
-    out.push_str("\n## CARDS\n\n");
-    for card in &picked {
-        out.push_str(card.body.trim_end());
-        out.push_str("\n\n---\n\n");
-    }
-    out
+    let selection: Vec<(String, Vec<usize>)> = cards
+        .iter()
+        .filter(|card| chosen.is_empty() || chosen.contains(&card.name))
+        .map(|card| (card.name.clone(), (0..card.full_outline().nodes.len()).collect()))
+        .collect();
+    build_selection(cards, &selection)
 }
 
 /// A rough token count for what was written.
@@ -115,6 +99,24 @@ mod tests {
         assert!(text.contains("* kol"));
         assert!(text.contains("parser"));
         assert!(text.contains("nothing"));
+        assert!(!text.contains("of 1 sections"), "whole cards are not partial");
+    }
+
+    #[test]
+    fn out_carries_a_linked_readme_like_pick_does() {
+        let dir = std::env::temp_dir().join(format!("dk-brief-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let readme = dir.join("README.md");
+        std::fs::write(&readme, "# moxi\n\nThe linked text.\n").unwrap();
+
+        let card = Card::parse(
+            "moxi",
+            &format!("# moxi\nid: a\nstatus: active\nreadme: {}\n\n## now\nparser\n", readme.display()),
+            0,
+        );
+        let text = build(&[card], &[]);
+        assert!(text.contains("The linked text."), "{text}");
+        let _ = std::fs::remove_file(&readme);
     }
 
     #[test]

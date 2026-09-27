@@ -20,7 +20,7 @@ is `dk`.
 
 **AGE** is days since you last touched the project — for a git repository,
 the last commit or staged change; for anything else, the last time the card
-was edited. docket's own rewrites never count, so `sync` cannot make a
+was edited. docket's own rewrites never count, so a migration cannot make a
 forgotten project look fresh.
 
 **DONE** is how much of the card you have actually written: sections with
@@ -76,6 +76,7 @@ id: a43b21c0
 status: active
 what: semantic spatial description language
 path: /home/andrew/code/moxi
+readme: /home/andrew/code/moxi/README.md
 
 ## now
 Rewriting the parser to keep source spans.
@@ -91,31 +92,34 @@ some notes between the boxes are fine
 Should `place` accept relative anchors?
 
 ## notes
-
-## readme
-<the project's README, whole>
 ```
 
 Field lines above the first `##`, then whatever you type. Prose, lists,
 `[ ]` checkboxes, any mix — the sections are yours. Checkboxes are ordinary
-GitHub checklist syntax, so the card renders correctly anywhere. The README always
-sits last, because the hand-written sections are what you came for and the
-README is reference.
+GitHub checklist syntax, so the card renders correctly anywhere.
 
-`dk add .` names the card after the project's own name — the `name` in
-`Cargo.toml`, `package.json` or `pyproject.toml` — falling back to the
-directory only when there is no manifest. A crate in `repo/cli` becomes
-`fur-cli`, not `cli`. The filename is the card's identity, so use
+**The README is linked, not copied.** `readme:` is a path, and the file is
+read when you run `show`, `pick` or `out` — so it is never stale, there is
+nothing to re-sync, and an AI asked to revise the card cannot rewrite the
+project's README along with it. The card stays a page of your own notes.
+
+Everywhere the README appears it is grafted on as a final `## readme`
+section, with its own headings nested beneath it, so it can be picked whole
+or one heading at a time. If the file has moved, output says
+`[no README at …]` rather than quietly leaving it out.
+
+The trade is that a card is no longer self-contained: read the store on a
+machine where the project is not checked out and the README is missing. Your
+notes, which are the part docket exists to keep, are always there.
+
+Known statuses aside, `dk add .` names the card after the project's own name
+— the `name` in `Cargo.toml`, `package.json` or `pyproject.toml` — falling
+back to the directory when there is no manifest. A crate in `repo/cli`
+becomes `fur-cli`, not `cli`. The filename is the card's identity, so use
 `dk rename` to change it; editing the `#` heading by hand does not move it.
 
 `dk add` with no path makes a card with no `path:`. That is an idea, and
 ideas are first-class here.
-
-The README is captured once, at `add`. When a project's README moves on, `dk
-sync` re-reads it — every card with a path, or one named card. Sync replaces
-the `## readme` section and touches nothing above it, so your own notes are
-never at risk. It is a command you run, never something that happens on its
-own: a card that rewrites itself is a card you stop trusting.
 
 ## Commands
 
@@ -126,7 +130,6 @@ own: a card that rewrites itself is a card you stop trusting.
 | `dk edit <name>` | edit a card in the terminal |
 | `dk code [name]` | open a card in VS Code; no name opens the whole store |
 | `dk add [path]` | new card; no path means an idea |
-| `dk sync [name]` | re-read project READMEs into their cards |
 | `dk pick` | browse, choose sections, write `DOCKET.md` (alias `dk tree`) |
 | `dk out` | write every card to `DOCKET.md` |
 | `dk rename <old> <new>` | rename a card, heading and all |
@@ -278,9 +281,8 @@ cd ~/notes/docket && git init && git add -A && git commit -m "docket store"
 platform put it. Open a new shell, or `source ~/.bashrc`, before running `dk`
 again.
 
-The cards are the only copy. There is no undo, `dk rm` is permanent, and `dk
-sync` rewrites the README section of every card it touches. Git turns all
-three from *gone* into one command back. And because a card is markdown and
+Your notes are the only copy. There is no undo and `dk rm` is permanent, so
+git turns *gone* into one command back. And because a card is markdown and
 its hash never changes, `git log -p moxi.md` is a readable history of how you
 thought about that project over six months — which is the record docket
 exists to keep.

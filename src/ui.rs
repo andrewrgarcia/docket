@@ -161,14 +161,29 @@ pub fn render_card(card: &Card) -> String {
 }
 
 fn render_card_with(card: &Card, color: bool) -> String {
-    if !color {
-        let mut body = card.body.clone();
-        if !body.ends_with('\n') {
-            body.push('\n');
+    let mut text = card.body.trim_end().to_string();
+    text.push('\n');
+
+    // The card links its README; showing the card means showing what the card
+    // stands for, so the linked file is read and appended here.
+    match (card.readme.is_empty(), card.readme_text()) {
+        (false, Some(readme)) => {
+            text.push_str(&format!("\n{}\n\n{}\n", crate::card::README_HEADING, readme.trim_end()));
         }
-        return body;
+        (false, None) => {
+            text.push_str(&format!(
+                "\n{}\n\n[no README at {}]\n",
+                crate::card::README_HEADING,
+                card.readme
+            ));
+        }
+        (true, _) => {}
     }
-    let lines: Vec<String> = card.body.lines().map(String::from).collect();
+
+    if !color {
+        return text;
+    }
+    let lines: Vec<String> = text.lines().map(String::from).collect();
     let kinds = syntax::classify(&lines);
     let mut out = String::new();
     for (line, kind) in lines.iter().zip(kinds) {

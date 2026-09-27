@@ -50,6 +50,40 @@ pub struct Outline {
 }
 
 impl Outline {
+    /// Hang another document under a new root heading of this one.
+    ///
+    /// This is how a linked README joins a card's outline: the card's own
+    /// sections are parsed from the card, the README is parsed from its file,
+    /// and the two are grafted together so the picker sees one tree. Indices
+    /// of the existing nodes do not move, so anything already holding them
+    /// stays valid.
+    pub fn graft(&mut self, heading: &str, lines: Vec<String>, other: Outline) -> usize {
+        let root = self.nodes.len();
+        self.nodes.push(Node {
+            heading: heading.to_string(),
+            level: 2,
+            lines,
+            children: Vec::new(),
+            parent: None,
+            depth: 0,
+        });
+        self.roots.push(root);
+
+        let offset = self.nodes.len();
+        for mut node in other.nodes {
+            node.depth += 1;
+            node.parent = Some(node.parent.map_or(root, |p| p + offset));
+            for child in &mut node.children {
+                *child += offset;
+            }
+            self.nodes.push(node);
+        }
+        for child in other.roots {
+            self.nodes[root].children.push(child + offset);
+        }
+        root
+    }
+
     /// Every descendant of `index`, including itself, in document order.
     pub fn subtree(&self, index: usize) -> Vec<usize> {
         let mut out = vec![index];
@@ -143,6 +177,52 @@ pub fn parse(body: &str) -> Outline {
         let depth = outline.nodes[parent].depth + 1;
         let index = push(&mut outline, line, level, Some(parent), depth);
         outline.nodes[parent].children.push(index);
+        stack.push((level, index));
+        current = Some(index);
+    }
+
+    outline
+}
+
+/// Parse an ordinary markdown document: every heading is part of the tree,
+/// nested by depth, with the shallowest ones as roots.
+///
+/// This is what a linked README gets. `parse` above is for cards, where the
+/// rules exist to tell the card's own five sections from whatever document
+/// follows them — applied to a README those rules would throw away its `#`
+/// title, which is the one heading naming the thing.
+pub fn parse_document(text: &str) -> Outline {
+    let mut outline = Outline::default();
+    let mut stack: Vec<(usize, usize)> = Vec::new();
+    let mut current: Option<usize> = None;
+    let mut fence: Option<usize> = None;
+
+    for line in text.lines() {
+        let ticks = fence_marker(line);
+        match (fence, ticks) {
+            (None, Some(n)) => fence = Some(n),
+            (Some(open), Some(n)) if n >= open => fence = None,
+            _ => {}
+        }
+        let in_fence = fence.is_some() || ticks.is_some();
+
+        let Some((level, _)) = (if in_fence { None } else { heading(line) }) else {
+            if let Some(at) = current {
+                outline.nodes[at].lines.push(line.to_string());
+            }
+            continue;
+        };
+
+        while stack.last().is_some_and(|(open, _)| *open >= level) {
+            stack.pop();
+        }
+        let parent = stack.last().map(|(_, at)| *at);
+        let depth = parent.map_or(0, |at| outline.nodes[at].depth + 1);
+        let index = push(&mut outline, line, level, parent, depth);
+        match parent {
+            Some(at) => outline.nodes[at].children.push(index),
+            None => outline.roots.push(index),
+        }
         stack.push((level, index));
         current = Some(index);
     }
@@ -336,6 +416,74 @@ a table
     #[test]
     fn a_card_with_no_sections_has_no_outline() {
         assert_eq!(parse("# moxi\nid: a43b\n").nodes.len(), 0);
+    }
+
+    #[test]
+    fn a_document_keeps_its_title_as_the_root() {
+        let doc = parse_document("# The Tool\n\nIntro.\n\n## Install\nsteps\n\n## Usage\nrun it\n");
+        assert_eq!(titles(&doc, &doc.roots), vec!["The Tool"]);
+        assert_eq!(
+            titles(&doc, &doc.nodes[0].children),
+            vec!["Install", "Usage"]
+        );
+    }
+
+    #[test]
+    fn a_document_with_no_title_has_several_roots() {
+        // FUR's README: an HTML masthead, then `##` headings all the way.
+        let doc = parse_document("<p>logo</p>\n\n## Why\na\n\n## Install\nb\n");
+        assert_eq!(titles(&doc, &doc.roots), vec!["Why", "Install"]);
+    }
+
+    #[test]
+    fn a_document_nests_by_depth_not_by_order() {
+        let doc = parse_document("# T\n\n## A\n\n### A1\n\n## B\n");
+        assert_eq!(titles(&doc, &doc.nodes[0].children), vec!["A", "B"]);
+        let a = doc.nodes[0].children[0];
+        assert_eq!(titles(&doc, &doc.nodes[a].children), vec!["A1"]);
+    }
+
+    #[test]
+    fn a_document_ignores_headings_inside_fences() {
+        let doc = parse_document("# T\n\n```\n# not a heading\n```\n\n## Real\n");
+        assert_eq!(titles(&doc, &doc.nodes[0].children), vec!["Real"]);
+    }
+
+    #[test]
+    fn grafting_hangs_a_document_under_a_new_root() {
+        let mut card = parse("## now\nparser\n\n## next\nspans\n");
+        let readme = parse_document("# The Tool\n\nIntro.\n\n## Install\nsteps\n");
+        let at = card.graft("## readme", vec![], readme);
+
+        let roots: Vec<&str> = card.roots.iter().map(|i| card.nodes[*i].title()).collect();
+        assert_eq!(roots, vec!["now", "next", "readme"]);
+        assert_eq!(card.nodes[at].depth, 0);
+
+        let children: Vec<&str> = card.nodes[at]
+            .children
+            .iter()
+            .map(|i| card.nodes[*i].title())
+            .collect();
+        assert_eq!(children, vec!["The Tool"]);
+
+        // The README's own structure survives, one level deeper.
+        let tool = card.nodes[at].children[0];
+        assert_eq!(card.nodes[tool].depth, 1);
+        let inner: Vec<&str> = card.nodes[tool]
+            .children
+            .iter()
+            .map(|i| card.nodes[*i].title())
+            .collect();
+        assert_eq!(inner, vec!["Install"]);
+        assert_eq!(card.nodes[card.nodes[tool].children[0]].depth, 2);
+    }
+
+    #[test]
+    fn grafting_leaves_existing_indices_alone() {
+        let mut card = parse("## now\nparser\n");
+        let before = card.text_of(0);
+        card.graft("## readme", vec![], parse_document("## Install\nsteps\n"));
+        assert_eq!(card.text_of(0), before);
     }
 
     #[test]

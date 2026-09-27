@@ -3,7 +3,7 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::card::{age_days, Card};
+use crate::card::{age_days, Card, README_HEADING};
 use crate::id;
 use crate::error::{Error, Result};
 
@@ -58,6 +58,7 @@ impl Store {
             cards.push(card);
         }
         self.backfill_ids(&mut cards)?;
+        self.link_readmes(&mut cards)?;
         cards.sort_by(|a, b| {
             a.status
                 .is_cold()
@@ -81,6 +82,30 @@ impl Store {
             taken.insert(fresh.clone());
             card.body = insert_id(&card.body, &fresh);
             card.id = fresh;
+            self.write_quietly(&card.name, &card.body)?;
+        }
+        Ok(())
+    }
+
+    /// Turn an embedded `## readme` section into a `readme:` link.
+    ///
+    /// Stores written before the link existed carry a copy of every README.
+    /// The copy is dropped only when the real file can be found, so a project
+    /// that has moved keeps its copy until you point the card at the new path
+    /// yourself. Like the id backfill, it happens once and preserves mtime.
+    fn link_readmes(&self, cards: &mut [Card]) -> Result<()> {
+        for card in cards.iter_mut() {
+            if !card.readme.is_empty() || card.path.is_empty() {
+                continue;
+            }
+            if !card.body.lines().any(|l| l.trim_end().eq_ignore_ascii_case(README_HEADING)) {
+                continue;
+            }
+            let Some(found) = crate::derive::readme_of(Path::new(&card.path)) else {
+                continue;
+            };
+            card.body = card.link_readme(&found);
+            card.readme = found;
             self.write_quietly(&card.name, &card.body)?;
         }
         Ok(())

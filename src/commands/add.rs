@@ -97,17 +97,7 @@ fn create(
         theme::paint(name, &[BOLD, GREEN])
     );
     if !readme.is_empty() {
-        println!(
-            "{}",
-            theme::paint(
-                &format!(
-                    "  README captured, {} lines, ~{} tokens",
-                    readme.lines().count(),
-                    readme.chars().count() / 4
-                ),
-                &[DIM]
-            )
-        );
+        println!("{}", theme::paint(&format!("  readme → {readme}"), &[DIM]));
     }
     if !agents.is_empty() {
         println!("{}", theme::paint(&format!("  {agents} noted"), &[DIM]));

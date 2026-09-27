@@ -76,7 +76,7 @@ impl Picker {
         let nodes = cards
             .into_iter()
             .map(|card| {
-                let outline = card.outline();
+                let outline = card.full_outline();
                 let shown = outline
                     .nodes
                     .iter()

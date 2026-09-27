@@ -20,6 +20,10 @@ pub struct Card {
     pub what: String,
     pub path: String,
     pub agents: String,
+    /// Absolute path of the project's README, if it has one. The card links
+    /// to it rather than holding a copy: a copy goes stale, and an AI asked
+    /// to revise the card would happily rewrite the README along with it.
+    pub readme: String,
     /// The file as written, including the header.
     pub body: String,
     /// Days since the file was last modified.
@@ -103,28 +107,38 @@ impl Card {
             what: field("what:"),
             path: field("path:"),
             agents: field("agents:"),
+            readme: field("readme:"),
             body: body.to_string(),
             age_days,
         }
     }
 
-    /// Replace the card's README section, or add one when it has none. The
-    /// hand-written sections above it are untouched — the README is the only
-    /// part of a card docket ever rewrites, because it is the only part
-    /// docket wrote in the first place.
-    pub fn with_readme(&self, readme: &str) -> String {
+    /// The card with any embedded `## readme` section removed and a
+    /// `readme:` field added. Used once per card, to migrate stores written
+    /// before the README became a link.
+    pub fn link_readme(&self, path: &str) -> String {
         let kept: String = self
             .body
             .lines()
             .take_while(|l| !l.trim_end().eq_ignore_ascii_case(README_HEADING))
             .collect::<Vec<_>>()
             .join("\n");
-        let kept = kept.trim_end();
 
-        if readme.trim().is_empty() {
-            return format!("{kept}\n");
+        let mut out = String::new();
+        let mut placed = false;
+        for line in kept.trim_end().lines() {
+            out.push_str(line);
+            out.push('\n');
+            // Straight after `path:`, where it reads as the pair it is.
+            if !placed && line.starts_with("path:") {
+                out.push_str(&format!("readme: {path}\n"));
+                placed = true;
+            }
         }
-        format!("{kept}\n\n{README_HEADING}\n\n{}\n", readme.trim_end())
+        if !placed {
+            out.insert_str(0, &format!("readme: {path}\n"));
+        }
+        out
     }
 
     /// The shortest prefix of this id that no other id in `others` shares.
@@ -156,10 +170,45 @@ impl Card {
             .to_string()
     }
 
-    /// The card's headings as a tree: its own sections at the top, anything
-    /// a README brought with it nested underneath. See `outline.rs`.
+    /// The card's own headings, as written in the card file.
     pub fn outline(&self) -> Outline {
         outline::parse(&self.body)
+    }
+
+    /// The card's headings with the linked README grafted on as a final
+    /// `## readme` section. This is what the picker shows and what `out`,
+    /// `pick` and `show` write — the README is read at that moment, so it is
+    /// never stale and never duplicated into the card.
+    ///
+    /// A README that has moved or been deleted becomes a one-line note rather
+    /// than a silent omission: a brief that quietly lost a document is worse
+    /// than one that says the document is missing.
+    pub fn full_outline(&self) -> Outline {
+        let mut tree = self.outline();
+        if self.readme.is_empty() {
+            return tree;
+        }
+        match self.readme_text() {
+            Some(text) => {
+                tree.graft(README_HEADING, Vec::new(), outline::parse_document(&text));
+            }
+            None => {
+                tree.graft(
+                    README_HEADING,
+                    vec![format!("[no README at {}]", self.readme)],
+                    Outline::default(),
+                );
+            }
+        }
+        tree
+    }
+
+    /// The linked README's text, read now.
+    pub fn readme_text(&self) -> Option<String> {
+        if self.readme.is_empty() {
+            return None;
+        }
+        std::fs::read_to_string(&self.readme).ok()
     }
 
     /// The card's own sections, README excluded — it is the project's text,
@@ -217,13 +266,13 @@ impl Card {
         if !path.is_empty() {
             s.push_str(&format!("path: {path}\n"));
         }
+        if !readme.is_empty() {
+            s.push_str(&format!("readme: {readme}\n"));
+        }
         if !agents.is_empty() {
             s.push_str(&format!("agents: {agents}\n"));
         }
         s.push_str("\n## now\n\n## next\n\n## open questions\n\n## notes\n");
-        if !readme.is_empty() {
-            s.push_str(&format!("\n{README_HEADING}\n\n{}\n", readme.trim_end()));
-        }
         s
     }
 }
@@ -234,8 +283,8 @@ impl Card {
 /// or staged change — `.git/index` is rewritten by `add`, `commit` and
 /// `checkout`, which is exactly "when did I last work on this" without
 /// spawning git. For anything else it is the card file's own mtime. Docket's
-/// own rewrites (`sync`, id backfill) preserve the card's mtime so they never
-/// make a forgotten project look fresh.
+/// own rewrites (id backfill, readme linking) preserve the card's mtime so
+/// they never make a forgotten project look fresh.
 ///
 /// Unreadable metadata means zero rather than an error: an age column is
 /// never worth failing a command over.
@@ -326,87 +375,14 @@ mod tests {
         assert_eq!(card.short_id(&["a43b21c0".into(), "a43b9999".into()]), "a43b2");
     }
 
-    #[test]
-    fn the_readme_is_the_last_section() {
-        let card = Card::template("a43b21c0", "moxi", Status::Active, "a language", "/p", "", "# moxi\n\nA tool.");
-        let sections: Vec<&str> = card.lines().filter(|l| l.starts_with("## ")).collect();
-        assert_eq!(sections.last(), Some(&README_HEADING));
-        assert!(card.contains("A tool."));
-        assert!(card.find("## now").unwrap() < card.find(README_HEADING).unwrap());
-    }
-
-    #[test]
-    fn a_project_without_a_readme_gets_no_readme_section() {
-        let card = Card::template("a43b21c0", "moxi", Status::Idea, "x", "", "", "");
-        assert!(!card.contains(README_HEADING));
-        assert!(Card::parse("moxi", &card, 0).sections().iter().all(|(h, _)| h != README_HEADING));
-    }
 
 
-    #[test]
-    fn with_readme_replaces_only_the_readme_section() {
-        let card = Card::parse(
-            "moxi",
-            "# moxi\nid: a43b21c0\nstatus: active\n\n## now\nparser\n\n## readme\nold text\n",
-            0,
-        );
-        let updated = card.with_readme("new text");
-        assert!(updated.contains("## now\nparser"));
-        assert!(updated.contains("new text"));
-        assert!(!updated.contains("old text"));
-        assert_eq!(updated.matches(README_HEADING).count(), 1);
-    }
 
-    #[test]
-    fn with_readme_appends_when_there_was_none() {
-        let card = Card::parse("moxi", "# moxi\nid: a43b21c0\nstatus: active\n\n## now\n", 0);
-        let updated = card.with_readme("fresh");
-        assert!(updated.contains(README_HEADING));
-        assert!(updated.trim_end().ends_with("fresh"));
-    }
 
-    #[test]
-    fn with_readme_of_nothing_removes_the_section() {
-        let card = Card::parse("moxi", "# moxi\nid: a\n\n## now\nx\n\n## readme\nold\n", 0);
-        let updated = card.with_readme("");
-        assert!(!updated.contains(README_HEADING));
-        assert!(updated.contains("## now\nx"));
-    }
 
-    #[test]
-    fn sections_stop_at_the_readme() {
-        let c = Card::parse(
-            "x",
-            "# x\nid: a\n\n## now\nparser\n\n## next\n\n## readme\n## their heading\n",
-            0,
-        );
-        let headings: Vec<String> = c.sections().into_iter().map(|(h, _)| h).collect();
-        assert_eq!(headings, vec!["## now", "## next"]);
-    }
 
-    #[test]
-    fn the_outline_holds_the_readme_and_sections_does_not() {
-        let c = Card::parse(
-            "x",
-            "# x\nid: a\nstatus: active\n\n## now\nparser\n\n## readme\ntheirs\n",
-            0,
-        );
-        let outline = c.outline();
-        let roots: Vec<&str> = outline.roots.iter().map(|i| outline.nodes[*i].title()).collect();
-        assert_eq!(roots, vec!["now", "readme"]);
-        assert_eq!(c.sections().len(), 1, "completion ignores the readme");
-        assert_eq!(c.header(), "# x\nid: a\nstatus: active");
-    }
 
-    #[test]
-    fn a_readme_heading_never_counts_towards_completion() {
-        let c = Card::parse(
-            "x",
-            "# x\nid: a\n\n## now\n\n## readme\n# theirs\n\n## Install\nsteps\n",
-            0,
-        );
-        assert_eq!(c.completion(), (0, 1), "one own section, empty");
-    }
+
 
     #[test]
     fn completion_counts_sections_with_something_in_them() {

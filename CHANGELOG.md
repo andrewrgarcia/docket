@@ -36,9 +36,9 @@ First release. The binary is `dk`.
 - `dk add [path]` — register a project or create an idea. Names the card from
   the manifest's own `name`, derives `what` from its description or the
   README's first prose line, notes an `AGENTS.md`, and captures the whole
-  README as the card's last section.
-- `dk sync [name]` — re-read project READMEs into their cards, replacing
-  only the `## readme` section.
+  README by path. The file is read when a brief is written, so it is never
+  stale and never copied into the card; stores holding an embedded
+  `## readme` section are migrated to a link the first time they are read.
 - `dk show <name>` — read a card, coloured on a terminal and verbatim when
   piped. A bare `dk <name>` does the same.
 - `dk edit <name>` — a built-in modal editor, identical on Linux, macOS and

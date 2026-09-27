@@ -8,7 +8,6 @@ dk — every project and idea you have, in one list.
   dk edit <name>        edit a card here in the terminal
   dk code [name]        open a card in VS Code (no name: the whole store)
   dk add [path]         new card; no path means an idea
-  dk sync [name]        re-read project READMEs into their cards
   dk pick               browse and choose what to send, write DOCKET.md
                         (alias: dk tree)
   dk out                write every card to DOCKET.md
@@ -30,7 +29,6 @@ pub enum Command {
     Code(Option<String>),
     Where,
     Add(Option<String>),
-    Sync(Option<String>),
     Pick { out: Option<String> },
     Out { out: Option<String> },
     Rename { from: String, to: String },
@@ -67,7 +65,6 @@ where
         "code" => Ok(Command::Code(operands.first().cloned())),
         "where" => Ok(Command::Where),
         "add" => Ok(Command::Add(operands.first().cloned())),
-        "sync" => Ok(Command::Sync(operands.first().cloned())),
         "pick" | "p" | "tree" | "t" => Ok(Command::Pick { out }),
         "out" => Ok(Command::Out { out }),
         "rm" | "remove" => Ok(Command::Remove(one("rm <name>")?)),
@@ -135,11 +132,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn sync_takes_an_optional_name() {
-        assert_eq!(parse_words("sync").unwrap(), Command::Sync(None));
-        assert_eq!(parse_words("sync moxi").unwrap(), Command::Sync(Some("moxi".into())));
-    }
 
     #[test]
     fn where_is_its_own_verb_not_a_card_name() {

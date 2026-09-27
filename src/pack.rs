@@ -42,7 +42,7 @@ pub fn card_markdown(card: &Card, chosen: &[usize]) -> String {
     out.push_str(card.header().trim_end());
     out.push_str("\n\n");
 
-    let outline = card.outline();
+    let outline = card.full_outline();
     for index in 0..outline.nodes.len() {
         if chosen.contains(&index) {
             out.push_str(&outline.text_of(index));

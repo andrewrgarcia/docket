@@ -12,8 +12,8 @@ pub struct Derived {
     pub what: String,
     /// Relative path of an agent instruction file, if the project has one.
     pub agents: String,
-    /// The README, whole. Stored in the card so the model reads what the
-    /// project says about itself, not a hundred-character summary of it.
+    /// Absolute path of the project's README. The card links to it; the text
+    /// is read when a brief is written, never copied into the card.
     pub readme: String,
 }
 
@@ -64,28 +64,16 @@ pub fn inspect(dir: &Path) -> Derived {
             .find(|f| dir.join(f).is_file())
             .map(|f| (*f).to_string())
             .unwrap_or_default(),
-        readme: readme(dir).unwrap_or_default(),
+        readme: readme_of(dir).unwrap_or_default(),
     }
 }
 
-/// The README verbatim. A README past this size is generated, vendored or a
-/// book, and pasting it into every brief would crowd out the cards.
-const README_LIMIT: usize = 100_000;
-
-fn readme(dir: &Path) -> Option<String> {
-    let text = README_FILES
+pub fn readme_of(dir: &Path) -> Option<String> {
+    README_FILES
         .iter()
-        .find_map(|name| fs::read_to_string(dir.join(name)).ok())?;
-    if text.trim().is_empty() {
-        return None;
-    }
-    if text.len() > README_LIMIT {
-        let kept: String = text.chars().take(README_LIMIT).collect();
-        return Some(format!(
-            "{kept}\n\n[truncated by docket at {README_LIMIT} characters]"
-        ));
-    }
-    Some(text)
+        .map(|name| dir.join(name))
+        .find(|path| path.is_file())
+        .map(|path| path.display().to_string())
 }
 
 /// `(name, description)` from one manifest. Hand-rolled rather than three
@@ -456,22 +444,21 @@ mod tests {
     }
 
     #[test]
-    fn the_whole_readme_is_captured() {
-        let dir = scratch("full-readme");
+    fn the_readme_is_linked_by_path_not_copied() {
+        let dir = scratch("link-readme");
         let body = "# project\n\nA tool that does the thing.\n\n## Install\n\ncargo install x\n";
         fs::write(dir.join("README.md"), body).unwrap();
         let found = inspect(&dir);
-        assert_eq!(found.readme, body);
+        assert_eq!(found.readme, dir.join("README.md").display().to_string());
+        assert!(!found.readme.contains("cargo install"), "a path, not the text");
         assert_eq!(found.what, "A tool that does the thing.");
     }
 
     #[test]
-    fn an_enormous_readme_is_truncated_with_a_marker() {
-        let dir = scratch("big-readme");
-        fs::write(dir.join("README.md"), "x".repeat(README_LIMIT + 5_000)).unwrap();
-        let found = inspect(&dir);
-        assert!(found.readme.ends_with("characters]"));
-        assert!(found.readme.chars().count() < README_LIMIT + 100);
+    fn a_project_without_a_readme_links_nothing() {
+        let dir = scratch("no-readme");
+        fs::write(dir.join("Cargo.toml"), "[package]\nname = \"x\"\n").unwrap();
+        assert!(inspect(&dir).readme.is_empty());
     }
 
     #[test]

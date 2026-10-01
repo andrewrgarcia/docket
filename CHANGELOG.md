@@ -13,6 +13,9 @@ follow [Semantic Versioning].
   pieces are bracketed lines, not omissions. Token cost per part goes to
   stderr; the path written goes to stdout. Refuses to write into the store.
   See `docs/resume-contract.md`.
+- Long-form documents: a linked file starting `<!-- dk:doc v1 -->` in a
+  card's sessions conversation is listed under `### documents` in
+  `RESUME.md` — title, status, cost, date — and never inlined.
 - `white:` card field — names a `ygg` manifest other than the project's
   `WHITE.md`.
 

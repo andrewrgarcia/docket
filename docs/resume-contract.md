@@ -131,10 +131,47 @@ Then one marker line is appended to `convo.md`:
   this affects fur commands only. (fur follow-up, out of scope.)
 
 **Card write-back.** At close, the agent may change three things in the card
-and nothing else: replace the body of `## now` with `state`; tick `[ ]` → `[x]`
-for items finished; append new `[ ]` items to `## next` for things discovered.
+and nothing else:
+
+- **One `state:` line in `## now`.** The first line of `## now` that starts
+  with `state:` is replaced with `state: <the entry's state>`. If there is
+  none, one is inserted as the section's first line. Nothing else in `## now`
+  is touched — it holds your own prose and checklist, and an earlier draft of
+  this rule, "replace the body", would have deleted both (found by the first
+  real close, 2026-10-01).
+- **Tick boxes** `[ ]` → `[x]` for items this session finished, matched by
+  their existing text. Never reword a box.
+- **Append** new `[ ]` items to the end of `## next` for things discovered.
+
 Header fields, other sections and the README link are never touched. The
 card's age resets, which is correct, because you worked on it.
+
+### Documents: long-form output
+
+A session entry is a ledger, kept short because the newest three are loaded
+whole every time. When a session produces reasoning worth rereading in full —
+an option analysis, a phased plan, a spec still in draft — it goes into a
+**document** instead: a linked file in the same conversation, with the same
+marker line, named `DOC-YYYYMMDD-<slug>.md`:
+
+```markdown
+<!-- dk:doc v1 -->
+# Unified workflow — survey and design
+status: adopted
+```
+
+- `status:` is required: `draft`, `adopted` or `superseded`. Plans go stale,
+  and a superseded plan read as current is worse than none.
+- A document may be revised in place; the store is a git repo. When a new
+  document replaces an old one, the old one's `status:` line becomes
+  `superseded` — the only edit ever made to it.
+- The entry still records the conclusion, pointing at the document:
+  `- dk is the hub — see DOC-20261001-workflow-design`.
+- The test for writing one: if a `decided` or `rejected` line cannot hold its
+  reason in one line, the reason belongs in a document.
+- A spec the *code* will obey belongs in the project repo instead (like this
+  file), where it is versioned with the code it governs. Documents are for
+  reasoning, which stays private.
 
 ## D5 — `RESUME.md`: one file, ordered by what can't be rebuilt
 
@@ -150,6 +187,10 @@ directory):
 
 ## sessions
 <newest 3 entries, whole, newest first>
+
+### documents
+- DOC-20261001-workflow-design · Unified workflow · adopted · 3.8k tok · 2026-10-01
+- …one line per document, newest first: file, title, status, cost, date
 
 ### earlier
 - SES-20260901-110233 · M1 parser spans · 2026-09-01
@@ -172,7 +213,12 @@ directory):
 - stdout carries the path written and nothing else.
 - Entries are separated by a `---` rule. `### earlier` appears only when
   there is something older than the newest three.
-- Only a linked file whose first line is `<!-- dk:session` is a session.
+- **Documents are listed, never inlined**, however recent — an agent sees
+  that one exists, what it costs and whether it is current, and asks for it
+  by name. To have one loaded every time, make it a repo doc and put it in
+  `WHITE.md`. Documents do not count toward the three-entry window.
+- Only a linked file whose first line is `<!-- dk:session` is a session, and
+  only one starting `<!-- dk:doc` is a document.
   Other messages in the conversation (`fur jot` chatter, unlinked messages)
   are passed over without comment.
 - A link that is missing on disk, unreadable, or leaves the conversation

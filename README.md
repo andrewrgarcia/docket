@@ -231,7 +231,8 @@ prints to stderr before you paste it.
 
 Sessions are [fur](https://github.com/fur-labs/fur-cli) conversations kept in
 `sessions/` inside the store and tagged `dk-<card id>`; docket reads them and
-never writes them. Whatever ends a session — you, Claude Code, a Cowork run —
+never writes them. Long-form documents kept there (plans, option analyses) are
+listed by name, title, status and cost, never inlined. Whatever ends a session — you, Claude Code, a Cowork run —
 saves an entry there. The format, and what an entry must contain, is
 [docs/resume-contract.md](https://github.com/andrewrgarcia/docket/blob/main/docs/resume-contract.md).
 

@@ -805,3 +805,58 @@ fn resume_needs_a_card_that_exists() {
     assert_eq!(s.run(&["resume"]).status.code(), Some(2));
     assert_eq!(s.run(&["resume", "ghost"]).status.code(), Some(3));
 }
+
+fn doc(title: &str, status: &str, body: &str) -> String {
+    format!("<!-- dk:doc v1 -->\n# {title}\nstatus: {status}\n\n{body}\n")
+}
+
+#[test]
+fn resume_lists_documents_by_name_and_never_inlines_them() {
+    let s = Sandbox::new();
+    resume_card(&s, "moxi", "", None);
+    sessions(
+        &s,
+        "moxi-sessions-3f2a91c4",
+        &format!("dk-{CARD_ID}"),
+        &[
+            ("SES-20260901-110233.md", entry("title-1", "next-1")),
+            ("DOC-20260902-old-plan.md", doc("Old plan", "superseded", "OLD PLAN BODY")),
+            ("SES-20260915-090000.md", entry("title-2", "next-2")),
+            ("SES-20260920-090000.md", entry("title-3", "next-3")),
+            ("DOC-20261001-workflow-design.md", doc("Unified workflow", "adopted", &"WORKFLOW BODY ".repeat(100))),
+            ("SES-20260930-221400.md", entry("title-4", "next-4")),
+        ],
+    );
+
+    let text = resumed(&s, "moxi");
+    assert!(!text.contains("WORKFLOW BODY"), "documents are listed, not inlined: {text}");
+    assert!(!text.contains("OLD PLAN BODY"), "{text}");
+
+    // Newest first, with title, status, cost and date.
+    let at = |needle: &str| text.find(needle).unwrap_or_else(|| panic!("missing {needle:?}:\n{text}"));
+    assert!(text.contains("- DOC-20261001-workflow-design · Unified workflow · adopted · 364 tok · 2026-10-01"), "{text}");
+    assert!(text.contains("- DOC-20260902-old-plan · Old plan · superseded · "), "{text}");
+    assert!(at("DOC-20261001-workflow-design") < at("DOC-20260902-old-plan"), "{text}");
+
+    // Documents sit after the whole entries and before the earlier-index, and
+    // they do not use up the three-entry window.
+    assert!(at("title-2") < at("### documents"), "{text}");
+    assert!(at("### documents") < at("### earlier"), "{text}");
+    assert!(text.contains("- SES-20260901-110233 · next-1 · 2026-09-01"), "only title-1 is older than the newest three: {text}");
+    assert!(!text.contains("# moxi · title-1"), "{text}");
+}
+
+#[test]
+fn a_conversation_with_only_documents_still_says_no_sessions() {
+    let s = Sandbox::new();
+    resume_card(&s, "moxi", "", None);
+    sessions(
+        &s,
+        "moxi-sessions-3f2a91c4",
+        &format!("dk-{CARD_ID}"),
+        &[("DOC-20261001-plan.md", doc("Plan", "draft", "x"))],
+    );
+    let text = resumed(&s, "moxi");
+    assert!(text.contains("[no sessions yet]"), "{text}");
+    assert!(text.contains("- DOC-20261001-plan · Plan · draft · "), "{text}");
+}

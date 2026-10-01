@@ -5,7 +5,8 @@
 //!
 //! 1. **the card** — your own sections, README excluded;
 //! 2. **the sessions** — the newest three entries whole, older ones as one
-//!    index line each. These hold the *why*, which no other source does;
+//!    index line each, and every long-form document as one index line. These
+//!    hold the *why*, which no other source does;
 //! 3. **the code** — whatever `ygg` makes of the project's `WHITE.md`.
 //!
 //! It only reads. Session entries are written by whoever ends a session (a
@@ -105,6 +106,22 @@ struct Entry {
     text: String,
 }
 
+/// One long-form document: listed by name, never inlined. A plan or an option
+/// analysis can be thousands of tokens, and the three-entry window would lose
+/// its other two entries to it.
+struct Doc {
+    stem: String,
+    title: String,
+    status: String,
+    tokens: usize,
+}
+
+/// What a linked file in the conversation turned out to be.
+enum Linked {
+    Session(Entry),
+    Doc(Doc),
+}
+
 fn sessions_section(card: &Card, store_root: &Path) -> Result<String> {
     if card.id.is_empty() {
         return Ok(NO_SESSIONS.to_string());
@@ -125,7 +142,15 @@ fn sessions_section(card: &Card, store_root: &Path) -> Result<String> {
         }
     };
 
-    let (entries, notes) = read_entries(conversation);
+    let (linked, notes) = read_linked(conversation);
+    let mut entries = Vec::new();
+    let mut docs = Vec::new();
+    for item in linked {
+        match item {
+            Linked::Session(entry) => entries.push(entry),
+            Linked::Doc(doc) => docs.push(doc),
+        }
+    }
     let (older, whole) = entries.split_at(entries.len().saturating_sub(WHOLE));
 
     let mut out = String::new();
@@ -138,6 +163,11 @@ fn sessions_section(card: &Card, store_root: &Path) -> Result<String> {
     } else {
         let newest_first: Vec<&str> = whole.iter().rev().map(|e| e.text.trim_end()).collect();
         out.push_str(&newest_first.join("\n\n---\n\n"));
+    }
+    if !docs.is_empty() {
+        out.push_str("\n\n### documents\n\n");
+        let lines: Vec<String> = docs.iter().rev().map(doc_line).collect();
+        out.push_str(&lines.join("\n"));
     }
     if !older.is_empty() {
         out.push_str("\n\n### earlier\n\n");
@@ -188,13 +218,13 @@ fn conversations_tagged(chats: &Path, tag: &str) -> Result<Vec<Conversation>> {
     Ok(found)
 }
 
-/// Session entries in order (oldest first, as fur keeps them), plus a note for
-/// every linked file that could not be used.
+/// Session entries and documents in order (oldest first, as fur keeps them),
+/// plus a note for every linked file that could not be used.
 ///
-/// A message counts as a session only if it links a file whose first line is
-/// the `dk:session` marker. Ordinary `fur jot` chatter in the same conversation
-/// is not a session and is passed over without comment.
-fn read_entries(conversation: &Conversation) -> (Vec<Entry>, Vec<String>) {
+/// The first line of a linked file says what it is: `<!-- dk:session` or
+/// `<!-- dk:doc`. Anything else — ordinary `fur jot` chatter in the same
+/// conversation — is neither, and is passed over without comment.
+fn read_linked(conversation: &Conversation) -> (Vec<Linked>, Vec<String>) {
     let mut entries = Vec::new();
     let mut notes = Vec::new();
 
@@ -220,20 +250,60 @@ fn read_entries(conversation: &Conversation) -> (Vec<Entry>, Vec<String>) {
                 continue;
             }
         };
-        let is_session = text
+        let first = text
             .lines()
             .find(|l| !l.trim().is_empty())
-            .is_some_and(|l| l.trim_start().starts_with("<!-- dk:session"));
-        if !is_session {
-            continue;
-        }
+            .map(str::trim_start)
+            .unwrap_or("");
         let stem = Path::new(&link)
             .file_stem()
             .map(|s| s.to_string_lossy().into_owned())
             .unwrap_or_else(|| link.clone());
-        entries.push(Entry { stem, text });
+        if first.starts_with("<!-- dk:session") {
+            entries.push(Linked::Session(Entry { stem, text }));
+        } else if first.starts_with("<!-- dk:doc") {
+            let (title, status) = doc_header(&text);
+            entries.push(Linked::Doc(Doc { stem, title, status, tokens: brief::tokens(&text) }));
+        }
     }
     (entries, notes)
+}
+
+/// A document's `# title` and `status:` line, both from above its first `##`.
+fn doc_header(text: &str) -> (String, String) {
+    let mut title = String::new();
+    let mut status = String::new();
+    for line in text.lines().take_while(|l| !l.starts_with("## ")) {
+        if title.is_empty() {
+            if let Some(t) = line.strip_prefix("# ") {
+                title = t.trim().to_string();
+            }
+        }
+        if status.is_empty() {
+            if let Some(v) = line.strip_prefix("status:") {
+                status = v.trim().to_string();
+            }
+        }
+    }
+    if status.is_empty() {
+        status = "-".to_string();
+    }
+    (title, status)
+}
+
+/// `- DOC-20261001-workflow-design · Unified workflow · adopted · 3.8k tok · 2026-10-01`
+fn doc_line(doc: &Doc) -> String {
+    let cost = if doc.tokens < 1_000 {
+        format!("{} tok", doc.tokens)
+    } else {
+        format!("{:.1}k tok", doc.tokens as f64 / 1_000.0)
+    };
+    let date = date_of(&doc.stem);
+    let parts: Vec<&str> = [doc.stem.as_str(), doc.title.as_str(), doc.status.as_str(), cost.as_str(), date.as_str()]
+        .into_iter()
+        .filter(|p| !p.is_empty())
+        .collect();
+    format!("- {}", parts.join(" · "))
 }
 
 /// `- SES-20260901-110233 · M1 parser spans · 2026-09-01`
@@ -266,10 +336,11 @@ fn section_first_line(text: &str, name: &str) -> String {
     String::new()
 }
 
-/// `SES-20260901-110233` → `2026-09-01`; anything else → empty.
+/// `SES-20260901-110233` / `DOC-20261001-slug` → the date; anything else → empty.
 fn date_of(stem: &str) -> String {
     let digits: Vec<char> = stem
         .strip_prefix("SES-")
+        .or_else(|| stem.strip_prefix("DOC-"))
         .unwrap_or("")
         .chars()
         .take(8)
@@ -543,6 +614,19 @@ mod tests {
         assert_eq!(date_of("SES-20260901-110233"), "2026-09-01");
         assert_eq!(date_of("NOTE"), "");
         assert_eq!(date_of("SES-2026"), "");
+    }
+
+    #[test]
+    fn documents_are_dated_too() {
+        assert_eq!(date_of("DOC-20261001-workflow-design"), "2026-10-01");
+    }
+
+    #[test]
+    fn a_document_header_gives_title_and_status() {
+        let text = "<!-- dk:doc v1 -->\n# Unified workflow\nstatus: adopted\n\n## body\nstatus: not this\n";
+        assert_eq!(doc_header(text), ("Unified workflow".to_string(), "adopted".to_string()));
+        let bare = "<!-- dk:doc v1 -->\n# Plan\n\n## body\nstatus: not this\n";
+        assert_eq!(doc_header(bare), ("Plan".to_string(), "-".to_string()), "status is never borrowed from the body");
     }
 
     #[test]

@@ -158,7 +158,7 @@ fn readme_tagline(dir: &Path, name: &str) -> Option<String> {
 
         let plain = strip_markdown(line);
         // Too short to be a sentence, or the project's name again.
-        if plain.chars().count() < 12 || plain.to_ascii_lowercase() == name.to_ascii_lowercase() {
+        if plain.chars().count() < 12 || plain.eq_ignore_ascii_case(name) {
             continue;
         }
         // What is left after stripping links and images is what we keep; a

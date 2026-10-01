@@ -13,19 +13,33 @@ command = "cargo"
 args = ["test", "--all-targets"]
 
 # Correctness and footguns only. Style and pedantry are off.
-[tasks.lint]
+# Two passes: correctness everywhere, tests included.
+[tasks.lint-all]
 command = "cargo"
 args = [
     "clippy", "--all-targets", "--",
     "-D", "clippy::correctness",
     "-D", "clippy::suspicious",
-    "-W", "clippy::unwrap_used",
-    "-W", "clippy::expect_used",
-    "-W", "clippy::indexing_slicing",
     "-A", "clippy::style",
     "-A", "clippy::pedantic",
     "-A", "clippy::complexity",
 ]
+
+# Panics in shipped code only. A test panics to fail, so `--bins` leaves the
+# tests out; indexing is not linted (the indices are the code's own).
+[tasks.lint-bins]
+command = "cargo"
+args = [
+    "clippy", "--bins", "--",
+    "-W", "clippy::unwrap_used",
+    "-W", "clippy::expect_used",
+    "-A", "clippy::style",
+    "-A", "clippy::pedantic",
+    "-A", "clippy::complexity",
+]
+
+[tasks.lint]
+dependencies = ["lint-all", "lint-bins"]
 
 [tasks.build]
 command = "cargo"

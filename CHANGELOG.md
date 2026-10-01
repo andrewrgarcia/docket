@@ -5,6 +5,17 @@ follow [Semantic Versioning].
 
 ## [Unreleased]
 
+### Added
+- `dk resume <card>` — writes `RESUME.md`: the card's own sections, the newest
+  three session entries whole with older ones as an index line each, and the
+  code slice `ygg` makes of the project's `WHITE.md`. Sessions are read from a
+  fur archive in `<store>/sessions/`, found by the tag `dk-<card id>`. Missing
+  pieces are bracketed lines, not omissions. Token cost per part goes to
+  stderr; the path written goes to stdout. Refuses to write into the store.
+  See `docs/resume-contract.md`.
+- `white:` card field — names a `ygg` manifest other than the project's
+  `WHITE.md`.
+
 ## [0.1.0]
 
 First release. The binary is `dk`.

@@ -1,0 +1,201 @@
+# resume contract — v1 (draft)
+
+How a session's reasoning is saved when it ends, and how the next session,
+in any harness, picks it up. **This document is the interface.** `dk resume`
+is one reader of it. A Cowork session with the docket store connected is
+another, and needs no binary at all. Anything here can be written by hand.
+
+Five decisions, numbered so they can be approved one at a time.
+
+---
+
+## D1 — Sessions live in the docket store, as a fur archive
+
+```
+$DOCKET_HOME/
+├── moxi.md                          ← cards, as today (top-level *.md only)
+├── yggdrasil-cli.md
+└── sessions/                        ← a fur project root
+    └── chats/
+        └── moxi-sessions-3f2a91c4/
+            ├── convo.md             ← fur spine, one per card
+            ├── SES-20260930-221400.md
+            └── SES-20261002-093112.md
+```
+
+- `Store::cards()` reads only top-level `*.md`, so `sessions/` is invisible
+  to every existing command. No card can be created by accident.
+- One private git repo holds both the cards and the reasoning. One connected
+  folder in Cowork gives an agent all of it.
+- Public repos (moxi, ygg, fur) never get session logs committed into them.
+- `cd "$(dk where)/sessions" && fur search "spans"` searches every session of
+  every project.
+
+*Rejected:* a `chats/` folder inside each project repo — it would publish
+private reasoning from public repos, and put dk in the business of writing
+into projects, which the README promises it never does.
+
+## D2 — A card finds its sessions by tag, not by path
+
+The conversation for a card is the one whose front matter carries the tag
+`dk-<card id>`:
+
+```yaml
+---
+fur_schema: 1
+conversation_id: 3f2a91c4-0b7e-4c1d-9a55-2e6f0c8d1b37
+title: moxi sessions
+created_at: 2026-09-30T22:14:00Z
+tags:
+  - dk-a43b21c0
+  - session
+---
+```
+
+- The card id is fixed for the card's lifetime. The folder name, the title
+  and the card name are not: `dk rename` and fur's folder sync both change
+  names, and neither can break this link.
+- No new card field. Nothing to backfill.
+- Folder name follows fur's own rule, `<slug(title)>-<first 8 of id>`, so fur
+  never wants to rename it.
+- Zero conversations tagged → "no sessions yet". Two or more → error naming
+  both folders. Never a guess.
+
+*Rejected:* a `fur:` path field on the card. Paths rot on rename, and every
+existing card would need one.
+
+## D3 — The code slice is the project's `WHITE.md`
+
+- `dk resume` uses `<path>/WHITE.md` if it exists. An optional `white:` card
+  field overrides it for projects that keep the manifest elsewhere.
+- The manifest is the single knob for what code an agent gets. Want the
+  README in the resume? Put `README.md` in `WHITE.md`.
+- ygg runs with the project directory as working directory, with
+  `--white <manifest> --contents --out <temp>.md`, and dk inlines the result.
+- Failures read like the missing-README note, never an omission:
+  `[no WHITE.md at …]`, `[ygg not found — install yggdrasil-cli]`,
+  `[ygg failed: <first line of stderr>]`.
+
+## D4 — One session entry: fixed headings, every choice gives its reason
+
+A session ends by writing `SES-YYYYMMDD-HHMMSS.md` (UTC) next to `convo.md`:
+
+```markdown
+<!-- dk:session v1 -->
+# moxi · 2026-09-30 22:14 · cowork · opus-5.5 high
+
+## done
+- parser keeps source spans through the lowering pass
+
+## decided
+- spans stored as byte offsets, not line/col — <why>
+
+## rejected
+- carrying spans in a side table keyed by node id — <why not>
+
+## state
+M2 · 2 of 3 criteria met; error rendering for nested spans remaining
+
+## blockers
+none
+
+## next
+M2 finish · Sonnet 5 extended · tests gate every criterion
+
+## files
+- src/parser/span.rs — new
+```
+
+Rules:
+
+- All eight headings, always, in this order. An empty one says `none`, so a
+  missing heading means "forgot", never "nothing happened".
+- Every `decided` and `rejected` line carries its reason after ` — `.
+  **`rejected` is the reason this loop exists.** It is the reasoning a fresh
+  session cannot rebuild from the code.
+- `state`, `blockers` and `next` are session-pilot's SESSION CLOSE footer,
+  field for field. The footer is still printed in chat. The entry is what
+  survives the chat.
+
+Then one marker line is appended to `convo.md`:
+
+```
+<!-- fur:msg id=<uuid v4> avatar=claude ts=<RFC3339 UTC> link=SES-20260930-221400.md -->
+```
+
+- `sha256=` is added when the writer can compute it, and omitted otherwise.
+  fur treats it as optional.
+- The first session for a card creates the folder and `convo.md` (D2).
+- fur's `.fur/` index will not see new entries until
+  `fur rebuild --force` is run in `sessions/`. dk never reads `.fur/`, so
+  this affects fur commands only. (fur follow-up, out of scope.)
+
+**Card write-back.** At close, the agent may change three things in the card
+and nothing else: replace the body of `## now` with `state`; tick `[ ]` → `[x]`
+for items finished; append new `[ ]` items to `## next` for things discovered.
+Header fields, other sections and the README link are never touched. The
+card's age resets, which is correct, because you worked on it.
+
+## D5 — `RESUME.md`: one file, ordered by what can't be rebuilt
+
+`dk resume <card> [--out FILE]` writes `RESUME.md` (default, in the current
+directory):
+
+```markdown
+<!-- dk:resume v1 -->
+# RESUME · moxi
+
+## card
+<the card: header and its own sections — README excluded, see D3>
+
+## sessions
+<newest 3 entries, whole, newest first>
+
+### earlier
+- SES-20260901-110233 · M1 parser spans · 2026-09-01
+- …one line per older entry: file, first line of its `next`, date
+
+## code
+<ygg codex of WHITE.md, or the bracketed note from D3>
+```
+
+- **Order is by replaceability.** The card and sessions can't be rebuilt
+  from anything else; code can. A model that truncates loses the cheapest
+  part.
+- **No budget flag.** Section token counts and the total print to stderr on
+  the picker's heat scale. Show the cost before it is paid; the manifest is
+  the control. `--out` stays the only flag.
+- Older sessions appear as an index, the same idea as DOCKET's INDEX and
+  ygg's, so an agent can ask for one by name.
+- Refuses to write into the store root, because a `.md` file there would
+  become a card. Compared by real path, so `../store/RESUME.md` is caught too.
+- stdout carries the path written and nothing else.
+- Entries are separated by a `---` rule. `### earlier` appears only when
+  there is something older than the newest three.
+- Only a linked file whose first line is `<!-- dk:session` is a session.
+  Other messages in the conversation (`fur jot` chatter, unlinked messages)
+  are passed over without comment.
+- A link that is missing on disk, unreadable, or leaves the conversation
+  folder is reported as a bracketed line at the top of `## sessions`, and is
+  never read. A `convo.md` that is not valid text (an encrypted archive) is an
+  error that says so, not "no sessions yet".
+- A `code` failure never loses the card: `ygg` missing, failing, or silent
+  becomes a bracketed line and the file is still written.
+
+---
+
+## Who reads and writes what
+
+| actor | reads | writes |
+|---|---|---|
+| `dk resume` | card, `sessions/chats/*/convo.md` + links, `WHITE.md` via ygg | `RESUME.md` |
+| Cowork, store connected | card + sessions directly; code via a connected repo or a pasted codex | session entry, marker, card write-back |
+| Claude Code | `dk resume` output | same as Cowork, with plain file writes |
+| plain chat | pasted `RESUME.md` | nothing; prints the footer and the entry for you to save |
+| fur | `sessions/` as an ordinary archive | — (reads only) |
+
+## Not in v1
+
+- GitHub Action publishing a per-repo resume for computer-less sessions.
+- `dk pick` showing sessions as pickable nodes.
+- fur detecting that `convo.md` is newer than its index.

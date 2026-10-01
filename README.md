@@ -132,12 +132,13 @@ ideas are first-class here.
 | `dk add [path]` | new card; no path means an idea |
 | `dk pick` | browse, choose sections, write `DOCKET.md` (alias `dk tree`) |
 | `dk out` | write every card to `DOCKET.md` |
+| `dk resume <card>` | write `RESUME.md`: the card, its latest sessions, its code |
 | `dk rename <old> <new>` | rename a card, heading and all |
 | `dk rm <name>` | delete, after you type the name back |
 | `dk where` | print the store path |
 
-`--out <file>` sends `pick` or `out` somewhere other than `DOCKET.md`. That is
-the only flag. An unrecognised word is treated as a card name, so `dk moxi`
+`--out <file>` sends `pick`, `out` or `resume` somewhere other than their
+default file. That is the only flag. An unrecognised word is treated as a card name, so `dk moxi`
 works.
 
 Exit codes: `2` misuse, `3` no such card, `4` name already taken, `1`
@@ -214,6 +215,29 @@ order. Nothing is remembered between runs.
 `--out <file>` redirects `p` and `z` as well as `dk out`.
 
 `dk out` skips the screen and writes every card whole.
+
+## Resume
+
+```bash
+dk resume moxi        # writes RESUME.md, prints its path
+```
+
+One file for picking a project back up in any chat or agent: the card's own
+sections, the newest three session entries whole (older ones as one index line
+each), and the code named by the project's `WHITE.md`, rendered by
+[yggdrasil](https://github.com/andrewrgarcia/yggdrasil-cli). The README is not
+in it — put `README.md` in `WHITE.md` if you want it. What each part costs
+prints to stderr before you paste it.
+
+Sessions are [fur](https://github.com/fur-labs/fur-cli) conversations kept in
+`sessions/` inside the store and tagged `dk-<card id>`; docket reads them and
+never writes them. Whatever ends a session — you, Claude Code, a Cowork run —
+saves an entry there. The format, and what an entry must contain, is
+[docs/resume-contract.md](https://github.com/andrewrgarcia/docket/blob/main/docs/resume-contract.md).
+
+Anything missing shows up as a bracketed line, never as silence: `[no WHITE.md
+at …]`, `[ygg not found — install yggdrasil-cli]`, `[no sessions yet]`. A card
+may set `white: <file>` to name a manifest other than the project's `WHITE.md`.
 
 ## Editing
 
@@ -308,7 +332,8 @@ gives you a conflict you can see.
 files.
 
 **Not agent memory.** No daemon, no MCP server, no session capture, no
-retrieval. You choose what the model sees, by hand, every time.
+retrieval. `dk resume` reads session entries that something else wrote; it
+never records one. You choose what the model sees, by hand, every time.
 
 **Not a task manager.** No due dates, no priorities, no boards.
 

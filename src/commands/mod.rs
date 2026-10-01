@@ -5,6 +5,7 @@ mod code;
 mod out;
 mod remove;
 mod rename;
+mod resume;
 mod show;
 
 use crate::cli::{Command, HELP};
@@ -39,5 +40,6 @@ pub fn dispatch(command: Command) -> Result<()> {
         Command::Out { out } => out::all(&Store::open()?, out.as_deref()),
         Command::Rename { from, to } => rename::run(&Store::open()?, &from, &to),
         Command::Remove(name) => remove::run(&Store::open()?, &name),
+        Command::Resume { card, out } => resume::run(&Store::open()?, &card, out.as_deref()),
     }
 }

@@ -17,6 +17,7 @@ mod id;
 mod outline;
 mod pack;
 mod pick;
+mod resume;
 mod store;
 mod theme;
 mod ui;

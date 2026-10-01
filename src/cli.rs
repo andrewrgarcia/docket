@@ -11,11 +11,12 @@ dk — every project and idea you have, in one list.
   dk pick               browse and choose what to send, write DOCKET.md
                         (alias: dk tree)
   dk out                write every card to DOCKET.md
+  dk resume <card>      write RESUME.md: the card, its latest sessions, its code
   dk rename <old> <new> rename a card
   dk rm <name>          delete a card
   dk where              print the store path
 
-  --out <file>           with pick or out: write somewhere else
+  --out <file>           with pick, out or resume: write somewhere else
 
 Cards are addressed by name or by the first few characters of their hash.
 Cards are plain markdown. Set DOCKET_HOME to move the store.
@@ -33,6 +34,7 @@ pub enum Command {
     Out { out: Option<String> },
     Rename { from: String, to: String },
     Remove(String),
+    Resume { card: String, out: Option<String> },
     Help,
     Version,
 }
@@ -67,6 +69,7 @@ where
         "add" => Ok(Command::Add(operands.first().cloned())),
         "pick" | "p" | "tree" | "t" => Ok(Command::Pick { out }),
         "out" => Ok(Command::Out { out }),
+        "resume" => Ok(Command::Resume { card: one("resume <card>")?, out }),
         "rm" | "remove" => Ok(Command::Remove(one("rm <name>")?)),
         "rename" | "mv" => match operands {
             [from, to] => Ok(Command::Rename {
@@ -155,6 +158,19 @@ mod tests {
             parse_words("--out brief.md pick").unwrap(),
             Command::Pick { out: Some("brief.md".into()) }
         );
+    }
+
+    #[test]
+    fn resume_takes_a_card_and_an_optional_file() {
+        assert_eq!(
+            parse_words("resume moxi").unwrap(),
+            Command::Resume { card: "moxi".into(), out: None }
+        );
+        assert_eq!(
+            parse_words("resume moxi --out handoff.md").unwrap(),
+            Command::Resume { card: "moxi".into(), out: Some("handoff.md".into()) }
+        );
+        assert!(matches!(parse_words("resume"), Err(Error::Usage(_))));
     }
 
     #[test]

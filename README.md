@@ -224,9 +224,11 @@ dk resume moxi        # writes RESUME.md, prints its path
 
 One file for picking a project back up in any chat or agent: the card's own
 sections, the newest three session entries whole (older ones as one index line
-each), and the code named by the project's `WHITE.md`, rendered by
-[yggdrasil](https://github.com/andrewrgarcia/yggdrasil-cli). The README is not
-in it — put `README.md` in `WHITE.md` if you want it. What each part costs
+each), and an index of the code named by the project's `WHITE.md` (file, lines, tokens),
+made by [yggdrasil](https://github.com/andrewrgarcia/yggdrasil-cli). The files
+themselves are not in it: an agent with the repo opens what it needs, and a chat
+that cannot gets them by pasting `ygg --white WHITE.md --contents` beside the
+resume. The README is not listed — put `README.md` in `WHITE.md` if you want it. What each part costs
 prints to stderr before you paste it.
 
 Sessions are [fur](https://github.com/fur-labs/fur-cli) conversations kept in

@@ -727,7 +727,7 @@ fn resume_reports_a_missing_ygg_by_name() {
 
 #[cfg(unix)]
 #[test]
-fn resume_inlines_the_codex_ygg_writes_from_the_project_directory() {
+fn resume_lists_the_manifest_through_ygg_from_the_project_directory() {
     let s = Sandbox::new();
     let project = s.project("moxi-proj", &[("WHITE.md", "src/main.rs\n")]);
     resume_card(&s, "moxi", "", Some(&project));
@@ -739,7 +739,7 @@ fn resume_inlines_the_codex_ygg_writes_from_the_project_directory() {
     let text = fs::read_to_string(s.scratch.join("RESUME.md")).unwrap();
     assert!(text.contains("FAKE CODEX"), "{text}");
     assert!(text.contains("--white"), "{text}");
-    assert!(text.contains("--contents"), "{text}");
+    assert!(!text.contains("--contents"), "the code part is the index, not the files: {text}");
     assert!(text.contains(&format!("{}", project.join("WHITE.md").display())), "{text}");
     assert!(text.contains("moxi-proj"), "ygg runs inside the project: {text}");
 }

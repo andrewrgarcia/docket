@@ -68,10 +68,20 @@ existing card would need one.
 
 - `dk resume` uses `<path>/WHITE.md` if it exists. An optional `white:` card
   field overrides it for projects that keep the manifest elsewhere.
-- The manifest is the single knob for what code an agent gets. Want the
-  README in the resume? Put `README.md` in `WHITE.md`.
+- The manifest is the single knob for which files an agent is told about.
+  Want the README listed in the resume? Put `README.md` in `WHITE.md`.
 - ygg runs with the project directory as working directory, with
-  `--white <manifest> --contents --out <temp>.md`, and dk inlines the result.
+  `--white <manifest> --out <temp>.md`, and dk inlines the result: ygg's
+  index (path, lines, words, tokens per file), **not the file contents**.
+  An agent with the repo connected opens a file when the task needs it and
+  gets the current version. A chat that cannot read the repo is handed the
+  contents by pasting ygg's own codex (`ygg --white WHITE.md --contents`)
+  beside the resume.
+
+*Rejected:* inlining the contents by default. Measured on dk's own manifest,
+the contents were about two thirds of the resume (7.4k of roughly 11k
+tokens), paid on every resume whether or not the task touched code, and stale
+the moment the code changed.
 - Failures read like the missing-README note, never an omission:
   `[no WHITE.md at …]`, `[ygg not found — install yggdrasil-cli]`,
   `[ygg failed: <first line of stderr>]`.
@@ -197,7 +207,7 @@ directory):
 - …one line per older entry: file, first line of its `next`, date
 
 ## code
-<ygg codex of WHITE.md, or the bracketed note from D3>
+<ygg's index of WHITE.md — which files, how big — or the bracketed note from D3>
 ```
 
 - **Order is by replaceability.** The card and sessions can't be rebuilt
@@ -215,8 +225,9 @@ directory):
   there is something older than the newest three.
 - **Documents are listed, never inlined**, however recent — an agent sees
   that one exists, what it costs and whether it is current, and asks for it
-  by name. To have one loaded every time, make it a repo doc and put it in
-  `WHITE.md`. Documents do not count toward the three-entry window.
+  by name. A spec the code obeys belongs in the repo instead, and listed in
+  `WHITE.md` it shows in every resume's code index. Documents do not count
+  toward the three-entry window.
 - Only a linked file whose first line is `<!-- dk:session` is a session, and
   only one starting `<!-- dk:doc` is a document.
   Other messages in the conversation (`fur jot` chatter, unlinked messages)

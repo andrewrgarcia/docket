@@ -8,7 +8,8 @@ follow [Semantic Versioning].
 ### Added
 - `dk resume <card>` — writes `RESUME.md`: the card's own sections, the newest
   three session entries whole with older ones as an index line each, and the
-  code slice `ygg` makes of the project's `WHITE.md`. Sessions are read from a
+  index `ygg` makes of the project's `WHITE.md` (which files, how big, not
+  their contents). Sessions are read from a
   fur archive in `<store>/sessions/`, found by the tag `dk-<card id>`. Missing
   pieces are bracketed lines, not omissions. Token cost per part goes to
   stderr; the path written goes to stdout. Refuses to write into the store.

@@ -7,7 +7,8 @@
 //! 2. **the sessions** — the newest three entries whole, older ones as one
 //!    index line each, and every long-form document as one index line. These
 //!    hold the *why*, which no other source does;
-//! 3. **the code** — whatever `ygg` makes of the project's `WHITE.md`.
+//! 3. **the code** — the index `ygg` makes of the project's `WHITE.md`: which
+//!    files, how big. The files themselves are opened when a task needs them.
 //!
 //! It only reads. Session entries are written by whoever ends a session (a
 //! Cowork run, Claude Code, you by hand), straight into a fur archive under
@@ -476,8 +477,8 @@ fn marker_attrs(line: &str) -> Option<Vec<(String, String)>> {
 // the code
 // ---------------------------------------------------------------------------
 
-/// The `## code` section: ygg's codex of the manifest, or a bracketed reason
-/// there isn't one.
+/// The `## code` section: ygg's index of the manifest's files (not their
+/// contents), or a bracketed reason there isn't one.
 fn code_section(card: &Card) -> String {
     if card.path.is_empty() {
         return "[no project path — this card is an idea]".to_string();
@@ -503,7 +504,7 @@ fn code_section(card: &Card) -> String {
     run_ygg(project, &manifest)
 }
 
-/// `ygg --white <manifest> --contents --out <temp>.md`, run from the project so
+/// `ygg --white <manifest> --out <temp>.md`, run from the project so
 /// its `.gitignore` and relative paths behave as they do when you run it. stdin
 /// is closed so an unexpected prompt can never hang a resume.
 fn run_ygg(project: &Path, manifest: &Path) -> String {
@@ -513,7 +514,6 @@ fn run_ygg(project: &Path, manifest: &Path) -> String {
         .current_dir(project)
         .arg("--white")
         .arg(manifest)
-        .arg("--contents")
         .arg("--out")
         .arg(&temp)
         .stdin(Stdio::null())

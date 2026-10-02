@@ -3,6 +3,7 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::books;
 use crate::card::{age_days, Card, README_HEADING};
 use crate::id;
 use crate::error::{Error, Result};
@@ -12,20 +13,44 @@ use crate::error::{Error, Result};
 #[derive(Debug)]
 pub struct Store {
     root: PathBuf,
+    /// The registered book this store came from, when it came from one.
+    book: Option<String>,
 }
 
 impl Store {
-    /// `$DOCKET_HOME`, else the platform data directory. Created on first use,
-    /// which is why there is no `init` command.
-    pub fn open() -> Result<Store> {
-        let root = match env::var_os("DOCKET_HOME") {
-            Some(p) => PathBuf::from(p),
-            None => dirs::data_dir()
-                .ok_or_else(|| Error::other("no data directory on this system — set DOCKET_HOME"))?
-                .join("docket"),
-        };
+    /// The store a command works in: a registered book when one is named or
+    /// defaulted (see `books::choose`), else `$DOCKET_HOME`, else the platform
+    /// data directory. The data directory is created on first use, which is
+    /// why there is no `init` command; a registered book whose folder has
+    /// gone missing is an error, not a fresh empty book in its place.
+    pub fn open(book: Option<&str>) -> Result<Store> {
+        let registry = books::Registry::load()?;
+        let book_env = env::var("DOCKET_BOOK").ok();
+        let home = env::var_os("DOCKET_HOME").map(PathBuf::from);
+
+        match books::choose(registry.as_ref(), book, book_env.as_deref(), home)? {
+            books::Choice::Book { name, path } => {
+                if !path.is_dir() {
+                    return Err(Error::other(format!(
+                        "book `{name}` points at {}, which is not a folder — fix it in `dk book`'s file or run `dk book rm {name}`",
+                        path.display()
+                    )));
+                }
+                Ok(Store { root: path, book: Some(name) })
+            }
+            books::Choice::Home(root) => Store::create(root),
+            books::Choice::Legacy => Store::create(books::legacy_root()?),
+        }
+    }
+
+    fn create(root: PathBuf) -> Result<Store> {
         fs::create_dir_all(&root).map_err(|e| Error::io("create", &root, e))?;
-        Ok(Store { root })
+        Ok(Store { root, book: None })
+    }
+
+    /// The registered book's name, for headers. `None` for a plain store.
+    pub fn book(&self) -> Option<&str> {
+        self.book.as_deref()
     }
 
     pub fn root(&self) -> &Path {
@@ -200,7 +225,7 @@ mod tests {
         let root = env::temp_dir().join(format!("docket-test-{tag}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).unwrap();
-        Store { root }
+        Store { root, book: None }
     }
 
     fn put(store: &Store, name: &str, status: &str) {

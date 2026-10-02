@@ -15,6 +15,10 @@ pub enum Error {
     Ambiguous { query: String, hits: Vec<String> },
     /// The card already exists.
     Exists(String),
+    /// No book is registered under that name; `known` lists the ones that are.
+    NoBook { name: String, known: Vec<String> },
+    /// A book is already registered under that name or at that folder.
+    BookExists(String),
     /// A filesystem operation failed, with the path that failed.
     Io { doing: String, path: String, source: io::Error },
     /// Anything else worth one sentence.
@@ -38,8 +42,8 @@ impl Error {
     pub fn code(&self) -> i32 {
         match self {
             Error::Usage(_) => 2,
-            Error::NoCard(_) | Error::Ambiguous { .. } => 3,
-            Error::Exists(_) => 4,
+            Error::NoCard(_) | Error::Ambiguous { .. } | Error::NoBook { .. } => 3,
+            Error::Exists(_) | Error::BookExists(_) => 4,
             Error::Io { .. } | Error::Other(_) => 1,
         }
     }
@@ -58,6 +62,13 @@ impl fmt::Display for Error {
             Error::Exists(name) => {
                 write!(f, "`{name}` already exists — try `dk edit {name}`")
             }
+            Error::NoBook { name, known } if known.is_empty() => {
+                write!(f, "no book `{name}` — no books are registered; `dk book new <name>` makes one")
+            }
+            Error::NoBook { name, known } => {
+                write!(f, "no book `{name}` — the books are {}", known.join(", "))
+            }
+            Error::BookExists(why) => write!(f, "{why}"),
             Error::Io { doing, path, source } => {
                 write!(f, "cannot {doing} {path}: {source}")
             }

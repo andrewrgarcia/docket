@@ -16,10 +16,19 @@ dk — every project and idea you have, in one list.
   dk rm <name>          delete a card
   dk where              print the store path
 
+  dk book               list your books (separate collections of cards)
+  dk book new <name> [path]    make a book and register it
+  dk book add <path> [name]    register a folder of cards as a book
+  dk book rm <name>     forget a book (its folder is left alone)
+  dk book use <name>    make a book the default
+
   --out <file>           with pick, out or resume: write somewhere else
+  -b, --book <name>      use this book for one command (or write `name/card`)
 
 Cards are addressed by name or by the first few characters of their hash.
 Cards are plain markdown. Set DOCKET_HOME to move the store.
+With no books registered there is one store, as always. DOCKET_BOOK picks a
+book for a whole shell.
 ";
 
 #[derive(Debug, PartialEq, Eq)]
@@ -35,8 +44,29 @@ pub enum Command {
     Rename { from: String, to: String },
     Remove(String),
     Resume { card: String, out: Option<String> },
+    Book(BookCmd),
     Help,
     Version,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum BookCmd {
+    List,
+    New { name: String, path: Option<String> },
+    Add { path: String, name: Option<String> },
+    Rm(String),
+    Use(String),
+}
+
+/// The arguments as `main` sees them: the command, and the book named with
+/// `-b` if there was one. The flag may sit anywhere, like `--out`.
+pub fn parse_args<I>(args: I) -> Result<(Command, Option<String>)>
+where
+    I: IntoIterator<Item = String>,
+{
+    let args: Vec<String> = args.into_iter().collect();
+    let (rest, book) = take_book(&args)?;
+    Ok((parse(rest)?, book))
 }
 
 /// No parser crate: eight verbs, one positional each. The payoff is that an
@@ -66,6 +96,7 @@ where
         "edit" => Ok(Command::Edit(one("edit <name>")?)),
         "code" => Ok(Command::Code(operands.first().cloned())),
         "where" => Ok(Command::Where),
+        "book" | "books" => parse_book(operands),
         "add" => Ok(Command::Add(operands.first().cloned())),
         "pick" | "p" | "tree" | "t" => Ok(Command::Pick { out }),
         "out" => Ok(Command::Out { out }),
@@ -85,6 +116,48 @@ where
         }
         name => Ok(Command::Show(name.to_string())),
     }
+}
+
+fn parse_book(operands: &[String]) -> Result<Command> {
+    let usage = || Error::usage("try `dk help` for the book commands");
+    let cmd = match operands.split_first() {
+        None => BookCmd::List,
+        Some((verb, rest)) => match (verb.as_str(), rest) {
+            ("list" | "ls", []) => BookCmd::List,
+            ("new", [name]) => BookCmd::New { name: name.clone(), path: None },
+            ("new", [name, path]) => BookCmd::New { name: name.clone(), path: Some(path.clone()) },
+            ("add", [path]) => BookCmd::Add { path: path.clone(), name: None },
+            ("add", [path, name]) => BookCmd::Add { path: path.clone(), name: Some(name.clone()) },
+            ("rm" | "remove", [name]) => BookCmd::Rm(name.clone()),
+            ("use", [name]) => BookCmd::Use(name.clone()),
+            ("new", _) => return Err(Error::usage("try `dk book new <name> [path]`")),
+            ("add", _) => return Err(Error::usage("try `dk book add <path> [name]`")),
+            ("rm" | "remove", _) => return Err(Error::usage("try `dk book rm <name>`")),
+            ("use", _) => return Err(Error::usage("try `dk book use <name>`")),
+            _ => return Err(usage()),
+        },
+    };
+    Ok(Command::Book(cmd))
+}
+
+/// Pull `-b <name>` / `--book <name>` out of the arguments wherever it sits.
+fn take_book(args: &[String]) -> Result<(Vec<String>, Option<String>)> {
+    let mut rest = Vec::with_capacity(args.len());
+    let mut book = None;
+    let mut iter = args.iter();
+
+    while let Some(arg) = iter.next() {
+        match arg.as_str() {
+            "--book" | "-b" => {
+                let value = iter
+                    .next()
+                    .ok_or_else(|| Error::usage("--book needs a book name — `dk book` lists them"))?;
+                book = Some(value.clone());
+            }
+            other => rest.push(other.to_string()),
+        }
+    }
+    Ok((rest, book))
 }
 
 /// Pull `--out <file>` out of the arguments wherever it sits. The only flag
@@ -181,6 +254,45 @@ mod tests {
         );
         assert!(matches!(parse_words("rename cli"), Err(Error::Usage(_))));
         assert!(matches!(parse_words("rename a b c"), Err(Error::Usage(_))));
+    }
+
+    fn parse_all(line: &str) -> Result<(Command, Option<String>)> {
+        parse_args(line.split_whitespace().map(String::from))
+    }
+
+    #[test]
+    fn the_book_flag_goes_anywhere_and_leaves_the_command_alone() {
+        assert_eq!(parse_all("-b bcrp").unwrap(), (Command::List, Some("bcrp".into())));
+        assert_eq!(
+            parse_all("show moxi --book bcrp").unwrap(),
+            (Command::Show("moxi".into()), Some("bcrp".into()))
+        );
+        assert_eq!(parse_all("where").unwrap(), (Command::Where, None));
+        assert!(matches!(parse_all("show moxi -b"), Err(Error::Usage(_))));
+    }
+
+    #[test]
+    fn book_verbs_parse() {
+        let book = |line: &str| match parse_words(line).unwrap() {
+            Command::Book(b) => b,
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(book("book"), BookCmd::List);
+        assert_eq!(book("book new bcrp"), BookCmd::New { name: "bcrp".into(), path: None });
+        assert_eq!(
+            book("book new bcrp /x"),
+            BookCmd::New { name: "bcrp".into(), path: Some("/x".into()) }
+        );
+        assert_eq!(book("book add /x"), BookCmd::Add { path: "/x".into(), name: None });
+        assert_eq!(
+            book("book add /x bcrp"),
+            BookCmd::Add { path: "/x".into(), name: Some("bcrp".into()) }
+        );
+        assert_eq!(book("book rm bcrp"), BookCmd::Rm("bcrp".into()));
+        assert_eq!(book("book use bcrp"), BookCmd::Use("bcrp".into()));
+        assert!(matches!(parse_words("book new"), Err(Error::Usage(_))));
+        assert!(matches!(parse_words("book rm"), Err(Error::Usage(_))));
+        assert!(matches!(parse_words("book frobnicate"), Err(Error::Usage(_))));
     }
 
     #[test]

@@ -33,20 +33,44 @@ impl Sandbox {
     }
 
     fn run_with_stdin(&self, args: &[&str], stdin: &str) -> Output {
+        self.spawn(args, stdin, true, &[])
+    }
+
+    /// Like `run`, but without `DOCKET_HOME`, so the registry decides which
+    /// book is used. `extra` adds environment variables for this run only.
+    fn run_books(&self, args: &[&str], extra: &[(&str, &str)]) -> Output {
+        self.spawn(args, "", false, extra)
+    }
+
+    fn spawn(&self, args: &[&str], stdin: &str, with_home: bool, extra: &[(&str, &str)]) -> Output {
         use std::io::Write;
-        let mut child = Command::new(env!("CARGO_BIN_EXE_dk"))
+        let base = self.home.parent().unwrap();
+        let mut command = Command::new(env!("CARGO_BIN_EXE_dk"));
+        command
             .args(args)
             .current_dir(&self.scratch)
-            .env("DOCKET_HOME", &self.home)
+            // Nothing a test runs may read or write the developer's own books.
+            .env("DOCKET_CONFIG", base.join("config").join("books.toml"))
+            .env("HOME", base.join("hm"))
+            .env("XDG_DATA_HOME", base.join("hm").join("data"))
+            .env("XDG_CONFIG_HOME", base.join("hm").join("config"))
+            .env_remove("DOCKET_BOOK")
             .env("NO_COLOR", "1")
             .env_remove("EDITOR")
             .env_remove("VISUAL")
             .env_remove("DOCKET_EDITOR")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .expect("binary should run");
+            .stderr(Stdio::piped());
+        if with_home {
+            command.env("DOCKET_HOME", &self.home);
+        } else {
+            command.env_remove("DOCKET_HOME");
+        }
+        for (key, value) in extra {
+            command.env(key, value);
+        }
+        let mut child = command.spawn().expect("binary should run");
         child.stdin.take().unwrap().write_all(stdin.as_bytes()).unwrap();
         child.wait_with_output().unwrap()
     }
@@ -859,4 +883,250 @@ fn a_conversation_with_only_documents_still_says_no_sessions() {
     let text = resumed(&s, "moxi");
     assert!(text.contains("[no sessions yet]"), "{text}");
     assert!(text.contains("- DOC-20261001-plan · Plan · draft · "), "{text}");
+}
+
+// ---- books ----------------------------------------------------------------
+
+fn text(out: &Output) -> String {
+    String::from_utf8_lossy(&out.stdout).into_owned()
+}
+
+impl Sandbox {
+    /// A second folder of cards, outside the sandbox's own store.
+    fn folder(&self, name: &str) -> PathBuf {
+        let dir = self.scratch.join(name);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// Run with the registry deciding the book, and expect success.
+    fn books_ok(&self, args: &[&str]) -> String {
+        let out = self.run_books(args, &[]);
+        assert!(out.status.success(), "`{args:?}` failed: {}", err(&out));
+        text(&out)
+    }
+}
+
+const CARD: &str = "# moxi\nid: a43b21c0\nstatus: active\nwhat: a language\n";
+
+#[test]
+fn with_no_registry_book_says_there_is_one_store() {
+    let s = Sandbox::new();
+    let out = s.books_ok(&["book"]);
+    assert!(out.contains("one store"), "{out}");
+}
+
+#[test]
+fn the_first_book_keeps_your_existing_store_as_the_default() {
+    let s = Sandbox::new();
+    s.card("moxi", CARD);
+    let bcrp = s.folder("bcrp");
+
+    // The existing store is found through DOCKET_HOME, as it would be for you.
+    let made = s.run(&["book", "new", "bcrp", bcrp.to_str().unwrap()]);
+    assert!(made.status.success(), "{}", err(&made));
+    assert!(text(&made).contains("your existing store"), "{}", text(&made));
+
+    // From here the registry decides. `dk` still shows the old cards...
+    let list = s.books_ok(&[]);
+    assert!(list.contains("moxi") && list.contains("book: store"), "{list}");
+    // ...and the new book is empty and named on request.
+    let empty = s.books_ok(&["-b", "bcrp"]);
+    assert!(empty.contains("book: bcrp") && empty.contains("no cards yet"), "{empty}");
+}
+
+#[test]
+fn a_book_listing_shows_counts_and_marks_the_default() {
+    let s = Sandbox::new();
+    s.card("moxi", CARD);
+    s.card("old", "# old\nid: 0badf00d\nstatus: done\nwhat: finished\n");
+    let bcrp = s.folder("bcrp");
+    s.run(&["book", "new", "bcrp", bcrp.to_str().unwrap()]);
+
+    let out = s.books_ok(&["book"]);
+    let store_row = out.lines().find(|l| l.contains(" store ")).expect(&out);
+    let bcrp_row = out.lines().find(|l| l.contains(" bcrp ")).expect(&out);
+    assert!(store_row.starts_with('*'), "{out}");
+    assert!(!bcrp_row.starts_with('*'), "{out}");
+    // two cards, one of them live
+    assert!(store_row.contains("    2") && store_row.contains("     1"), "{store_row}");
+}
+
+#[test]
+fn listing_books_never_rewrites_a_card() {
+    let s = Sandbox::new();
+    let bare = "# bare\nstatus: active\nwhat: no id yet\n";
+    s.card("bare", bare);
+    let bcrp = s.folder("bcrp");
+    s.run(&["book", "new", "bcrp", bcrp.to_str().unwrap()]);
+    s.books_ok(&["book"]);
+    assert_eq!(s.read("bare"), bare, "`dk book` must only read");
+}
+
+#[test]
+fn a_qualified_name_picks_its_book_and_beats_the_environment() {
+    let s = Sandbox::new();
+    let work = s.folder("work");
+    let home = s.folder("home");
+    fs::write(work.join("moxi.md"), "# moxi\nid: a43b21c0\nstatus: active\nwhat: in work\n").unwrap();
+    fs::write(home.join("moxi.md"), "# moxi\nid: b54c32d1\nstatus: active\nwhat: in home\n").unwrap();
+    s.books_ok(&["book", "add", work.to_str().unwrap(), "work"]);
+    s.books_ok(&["book", "add", home.to_str().unwrap(), "home"]);
+
+    assert!(s.books_ok(&["show", "work/moxi"]).contains("in work"));
+    assert!(s.books_ok(&["show", "home/moxi"]).contains("in home"));
+    assert!(s.books_ok(&["show", "moxi", "-b", "home"]).contains("in home"));
+
+    let env_home = s.run_books(&["show", "moxi"], &[("DOCKET_BOOK", "home")]);
+    assert!(text(&env_home).contains("in home"), "{}", err(&env_home));
+    let qualified_wins = s.run_books(&["show", "work/moxi"], &[("DOCKET_BOOK", "home")]);
+    assert!(text(&qualified_wins).contains("in work"), "{}", err(&qualified_wins));
+}
+
+#[test]
+fn a_flag_and_a_qualified_name_must_agree() {
+    let s = Sandbox::new();
+    let work = s.folder("work");
+    let home = s.folder("home");
+    s.books_ok(&["book", "add", work.to_str().unwrap(), "work"]);
+    s.books_ok(&["book", "add", home.to_str().unwrap(), "home"]);
+    let out = s.run_books(&["show", "work/moxi", "-b", "home"], &[]);
+    assert_eq!(out.status.code(), Some(2), "{}", err(&out));
+    assert!(err(&out).contains("different books"), "{}", err(&out));
+}
+
+#[test]
+fn an_unknown_book_exits_three_and_names_the_known_ones() {
+    let s = Sandbox::new();
+    let work = s.folder("work");
+    s.books_ok(&["book", "add", work.to_str().unwrap(), "work"]);
+    let out = s.run_books(&["-b", "nope"], &[]);
+    assert_eq!(out.status.code(), Some(3), "{}", err(&out));
+    assert!(err(&out).contains("work"), "{}", err(&out));
+
+    let none = Sandbox::new();
+    let out = none.run_books(&["-b", "nope"], &[]);
+    assert_eq!(out.status.code(), Some(3));
+    assert!(err(&out).contains("no books are registered"), "{}", err(&out));
+}
+
+#[test]
+fn several_books_and_no_default_ask_which_one() {
+    let s = Sandbox::new();
+    let a = s.folder("a");
+    let b = s.folder("b");
+    let c = s.folder("c");
+    for (path, name) in [(&a, "a"), (&b, "b"), (&c, "c")] {
+        s.books_ok(&["book", "add", path.to_str().unwrap(), name]);
+    }
+    // `a` became the default; removing it leaves two books and no default.
+    s.books_ok(&["book", "rm", "a"]);
+    let out = s.run_books(&[], &[]);
+    assert_eq!(out.status.code(), Some(2), "{}", err(&out));
+    assert!(err(&out).contains("no default"), "{}", err(&out));
+
+    s.books_ok(&["book", "use", "b"]);
+    assert!(s.books_ok(&[]).contains("book: b"));
+}
+
+#[test]
+fn removing_a_book_forgets_it_and_leaves_the_folder_and_cards_alone() {
+    let s = Sandbox::new();
+    let work = s.folder("work");
+    fs::write(work.join("moxi.md"), CARD).unwrap();
+    s.books_ok(&["book", "add", work.to_str().unwrap(), "work"]);
+    let out = s.books_ok(&["book", "rm", "work"]);
+    assert!(out.contains("untouched"), "{out}");
+    assert!(work.join("moxi.md").exists());
+    assert!(s.books_ok(&["book"]).contains("one store"));
+}
+
+#[test]
+fn removing_the_default_hands_it_to_the_only_book_left() {
+    let s = Sandbox::new();
+    let a = s.folder("a");
+    let b = s.folder("b");
+    s.books_ok(&["book", "add", a.to_str().unwrap(), "a"]);
+    s.books_ok(&["book", "add", b.to_str().unwrap(), "b"]);
+    s.books_ok(&["book", "rm", "a"]);
+    assert!(s.books_ok(&[]).contains("book: b"));
+}
+
+#[test]
+fn a_book_name_must_be_plain_and_unused_and_a_folder_registers_once() {
+    let s = Sandbox::new();
+    let a = s.folder("a");
+    let bad = s.run_books(&["book", "add", a.to_str().unwrap(), "Bad Name"], &[]);
+    assert_eq!(bad.status.code(), Some(2), "{}", err(&bad));
+
+    s.books_ok(&["book", "add", a.to_str().unwrap(), "a"]);
+    let again = s.run_books(&["book", "add", a.to_str().unwrap(), "other"], &[]);
+    assert_eq!(again.status.code(), Some(4), "{}", err(&again));
+    assert!(err(&again).contains("already the book `a`"), "{}", err(&again));
+
+    let b = s.folder("b");
+    let taken = s.run_books(&["book", "add", b.to_str().unwrap(), "a"], &[]);
+    assert_eq!(taken.status.code(), Some(4), "{}", err(&taken));
+}
+
+#[test]
+fn a_book_whose_folder_has_gone_is_an_error_not_a_new_empty_book() {
+    let s = Sandbox::new();
+    let gone = s.folder("gone");
+    s.books_ok(&["book", "add", gone.to_str().unwrap(), "gone"]);
+    fs::remove_dir_all(&gone).unwrap();
+
+    let out = s.run_books(&[], &[]);
+    assert_eq!(out.status.code(), Some(1), "{}", err(&out));
+    assert!(err(&out).contains("not a folder"), "{}", err(&out));
+    assert!(!gone.exists(), "docket must not recreate a missing book");
+    // The listing says so too, without failing.
+    assert!(s.books_ok(&["book"]).contains("missing folder"));
+}
+
+#[test]
+fn where_prints_the_chosen_books_path_alone() {
+    let s = Sandbox::new();
+    let a = s.folder("a");
+    let b = s.folder("b");
+    s.books_ok(&["book", "add", a.to_str().unwrap(), "a"]);
+    s.books_ok(&["book", "add", b.to_str().unwrap(), "b"]);
+    let got = s.books_ok(&["where", "-b", "b"]);
+    assert_eq!(got.trim_end(), fs::canonicalize(&b).unwrap().to_str().unwrap());
+}
+
+#[test]
+fn new_without_a_path_makes_a_folder_beside_the_data_directory() {
+    let s = Sandbox::new();
+    s.books_ok(&["book", "new", "demo"]);
+    let list = s.books_ok(&["book"]);
+    assert!(list.contains("docket-books"), "{list}");
+    assert!(s.books_ok(&["-b", "demo"]).contains("no cards yet"));
+}
+
+#[test]
+fn a_cards_work_happens_in_its_own_book() {
+    let s = Sandbox::new();
+    let work = s.folder("work");
+    let home = s.folder("home");
+    s.books_ok(&["book", "add", work.to_str().unwrap(), "work"]);
+    s.books_ok(&["book", "add", home.to_str().unwrap(), "home"]);
+    fs::write(work.join("moxi.md"), CARD).unwrap();
+
+    s.books_ok(&["rename", "work/moxi", "work/moxi2"]);
+    assert!(work.join("moxi2.md").exists() && !work.join("moxi.md").exists());
+    let cross = s.run_books(&["rename", "work/moxi2", "home/moxi"], &[]);
+    assert_eq!(cross.status.code(), Some(2), "{}", err(&cross));
+    assert!(home.read_dir().unwrap().next().is_none(), "nothing may land in the other book");
+}
+
+#[test]
+fn a_registry_that_cannot_be_read_is_reported_with_its_line() {
+    let s = Sandbox::new();
+    let config = s.home.parent().unwrap().join("config");
+    fs::create_dir_all(&config).unwrap();
+    fs::write(config.join("books.toml"), "[books]\nthis is not a book\n").unwrap();
+    let out = s.run_books(&[], &[]);
+    assert_eq!(out.status.code(), Some(1), "{}", err(&out));
+    assert!(err(&out).contains("books.toml:2"), "{}", err(&out));
 }

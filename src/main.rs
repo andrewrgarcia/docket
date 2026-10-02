@@ -4,6 +4,7 @@
 //! and no index; every command is a read or a write of plain text. `main` does
 //! nothing but turn arguments into a command and an error into an exit code.
 
+mod books;
 mod brief;
 mod card;
 mod checkbox;
@@ -27,7 +28,7 @@ use std::process::ExitCode;
 fn main() -> ExitCode {
     let args = std::env::args().skip(1);
 
-    let outcome = cli::parse(args).and_then(commands::dispatch);
+    let outcome = cli::parse_args(args).and_then(|(command, book)| commands::dispatch(command, book));
 
     match outcome {
         Ok(()) => ExitCode::SUCCESS,

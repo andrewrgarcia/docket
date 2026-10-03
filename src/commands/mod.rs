@@ -1,6 +1,7 @@
 mod add;
 mod book;
 mod edit;
+mod here;
 mod list;
 mod code;
 mod out;
@@ -36,7 +37,18 @@ pub fn dispatch(command: Command, book: Option<String>) -> Result<()> {
             }
             book::run(cmd)
         }
-        Command::List => list::run(&Store::open(flag)?),
+        Command::List => {
+            if flag.is_none() {
+                if let Some(registry) = books::Registry::load()? {
+                    let book_env = std::env::var("DOCKET_BOOK").ok();
+                    let home = std::env::var_os("DOCKET_HOME").map(std::path::PathBuf::from);
+                    if books::index_wanted(Some(&registry), None, book_env.as_deref(), home.as_deref()) {
+                        return index(&registry);
+                    }
+                }
+            }
+            list::run(&Store::open(flag)?)
+        }
         Command::Show(name) => {
             let (b, name) = scope(flag, &name)?;
             show::run(&Store::open(b)?, name)
@@ -72,10 +84,26 @@ pub fn dispatch(command: Command, book: Option<String>) -> Result<()> {
             let (b, name) = scope(flag, &name)?;
             remove::run(&Store::open(b)?, name)
         }
-        Command::Resume { card, out } => {
+        Command::Resume { card, out, place } => {
             let (b, card) = scope(flag, &card)?;
-            resume::run(&Store::open(b)?, card, out.as_deref())
+            resume::run(&Store::open(b)?, card, out.as_deref(), place.as_deref())
         }
+        Command::Here => here::run(&Store::open(flag)?),
+    }
+}
+
+/// Bare `dk` with several books: the index in a terminal, the plain book list
+/// anywhere else (a pipe has no one to press Enter).
+fn index(registry: &books::Registry) -> Result<()> {
+    use std::io::IsTerminal;
+    if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
+        book::print_list(registry);
+        return Ok(());
+    }
+    match crate::shelf::run(&books::summaries(registry))? {
+        crate::shelf::Choice::List(name) => list::run(&Store::open(Some(&name))?),
+        crate::shelf::Choice::Pick(name) => out::picked(&Store::open(Some(&name))?, None),
+        crate::shelf::Choice::Quit => Ok(()),
     }
 }
 

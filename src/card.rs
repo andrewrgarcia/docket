@@ -19,6 +19,9 @@ pub struct Card {
     pub status: Status,
     pub what: String,
     pub path: String,
+    /// Further folders the project lives in, from `place: <label> <path>`
+    /// lines. `path:` stays the primary place; see `all_places`.
+    pub places: Vec<Place>,
     pub agents: String,
     /// Absolute path of the project's README, if it has one. The card links
     /// to it rather than holding a copy: a copy goes stale, and an AI asked
@@ -28,6 +31,37 @@ pub struct Card {
     pub body: String,
     /// Days since the file was last modified.
     pub age_days: u64,
+}
+
+/// The label `path:` goes by when a card has several places.
+pub const MAIN_PLACE: &str = "main";
+
+/// One folder a project lives in: the repo, its issue archive, an eval harness.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Place {
+    pub label: String,
+    pub path: String,
+}
+
+/// `place: <label> <path>`: the label is one word, the path is the rest of the
+/// line, with a leading `~/` meaning the home folder. A line with no path is
+/// not a place.
+fn parse_place(value: &str) -> Option<Place> {
+    let value = value.trim();
+    let (label, path) = value.split_once(char::is_whitespace)?;
+    let path = path.trim();
+    if label.is_empty() || path.is_empty() {
+        return None;
+    }
+    Some(Place { label: label.to_string(), path: expand_home(path) })
+}
+
+fn expand_home(path: &str) -> String {
+    let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"));
+    match (path.strip_prefix("~/"), home) {
+        (Some(rest), Some(home)) => Path::new(&home).join(rest).display().to_string(),
+        _ => path.to_string(),
+    }
 }
 
 /// A card's status. The words docket knows about get a colour and a place in
@@ -106,11 +140,26 @@ impl Card {
             status: Status::parse(&field("status:")),
             what: field("what:"),
             path: field("path:"),
+            places: header
+                .iter()
+                .filter_map(|l| l.strip_prefix("place:"))
+                .filter_map(parse_place)
+                .collect(),
             agents: field("agents:"),
             readme: field("readme:"),
             body: body.to_string(),
             age_days,
         }
+    }
+
+    /// Every folder the project lives in, `path:` first as `main`.
+    pub fn all_places(&self) -> Vec<Place> {
+        let mut all = Vec::new();
+        if !self.path.is_empty() {
+            all.push(Place { label: MAIN_PLACE.to_string(), path: self.path.clone() });
+        }
+        all.extend(self.places.iter().cloned());
+        all
     }
 
     /// The card with any embedded `## readme` section removed and a
@@ -339,6 +388,7 @@ mod tests {
         assert_eq!(c.status, Status::Active);
         assert_eq!(c.what, "a language");
         assert_eq!(c.path, "/home/a/moxi");
+        assert!(c.places.is_empty());
         assert_eq!(c.age_days, 3);
     }
 
@@ -405,4 +455,26 @@ mod tests {
         assert_eq!(c.progress(), (1, 2));
     }
 
+
+    #[test]
+    fn places_come_from_the_header_and_follow_path() {
+        let body = "# m\nid: a\npath: /p/main\nplace: issues /p/issues archive\nplace: eval /p/eval\nplace: broken\n\n## now\nplace: nope /x\n";
+        let c = Card::parse("m", body, 0);
+        let labels: Vec<_> = c.all_places().iter().map(|p| (p.label.clone(), p.path.clone())).collect();
+        assert_eq!(
+            labels,
+            vec![
+                ("main".into(), "/p/main".into()),
+                ("issues".into(), "/p/issues archive".into()),
+                ("eval".into(), "/p/eval".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_card_without_path_can_still_have_places() {
+        let c = Card::parse("m", "# m\nid: a\nplace: eval /p/eval\n", 0);
+        assert_eq!(c.all_places().len(), 1);
+        assert_eq!(c.all_places()[0].label, "eval");
+    }
 }

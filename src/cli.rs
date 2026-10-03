@@ -12,6 +12,7 @@ dk — every project and idea you have, in one list.
                         (alias: dk tree)
   dk out                write every card to DOCKET.md
   dk resume <card>      write RESUME.md: the card, its latest sessions, its code
+  dk here               which card owns the folder you are in
   dk rename <old> <new> rename a card
   dk rm <name>          delete a card
   dk where              print the store path
@@ -23,9 +24,12 @@ dk — every project and idea you have, in one list.
   dk book use <name>    make a book the default
 
   --out <file>           with pick, out or resume: write somewhere else
+  --place <label>        with resume: only that place's code (see `place:` below)
   -b, --book <name>      use this book for one command (or write `name/card`)
 
 Cards are addressed by name or by the first few characters of their hash.
+A project in several folders: add `place: <label> <path>` lines to the card's
+header, under `path:`.
 Cards are plain markdown. Set DOCKET_HOME to move the store.
 With no books registered there is one store, as always. DOCKET_BOOK picks a
 book for a whole shell.
@@ -43,7 +47,8 @@ pub enum Command {
     Out { out: Option<String> },
     Rename { from: String, to: String },
     Remove(String),
-    Resume { card: String, out: Option<String> },
+    Resume { card: String, out: Option<String>, place: Option<String> },
+    Here,
     Book(BookCmd),
     Help,
     Version,
@@ -77,6 +82,7 @@ where
 {
     let args: Vec<String> = args.into_iter().collect();
     let (rest, out) = take_out(&args)?;
+    let (rest, place) = take_place(&rest)?;
 
     let Some((verb, operands)) = rest.split_first() else {
         return Ok(Command::List);
@@ -100,7 +106,8 @@ where
         "add" => Ok(Command::Add(operands.first().cloned())),
         "pick" | "p" | "tree" | "t" => Ok(Command::Pick { out }),
         "out" => Ok(Command::Out { out }),
-        "resume" => Ok(Command::Resume { card: one("resume <card>")?, out }),
+        "resume" => Ok(Command::Resume { card: one("resume <card>")?, out, place }),
+        "here" => Ok(Command::Here),
         "rm" | "remove" => Ok(Command::Remove(one("rm <name>")?)),
         "rename" | "mv" => match operands {
             [from, to] => Ok(Command::Rename {
@@ -158,6 +165,26 @@ fn take_book(args: &[String]) -> Result<(Vec<String>, Option<String>)> {
         }
     }
     Ok((rest, book))
+}
+
+/// Pull `--place <label>` out of the arguments wherever it sits.
+fn take_place(args: &[String]) -> Result<(Vec<String>, Option<String>)> {
+    let mut rest = Vec::with_capacity(args.len());
+    let mut place = None;
+    let mut iter = args.iter();
+
+    while let Some(arg) = iter.next() {
+        match arg.as_str() {
+            "--place" => {
+                let value = iter
+                    .next()
+                    .ok_or_else(|| Error::usage("--place needs a label — see the card's `place:` lines"))?;
+                place = Some(value.clone());
+            }
+            other => rest.push(other.to_string()),
+        }
+    }
+    Ok((rest, place))
 }
 
 /// Pull `--out <file>` out of the arguments wherever it sits. The only flag
@@ -237,11 +264,11 @@ mod tests {
     fn resume_takes_a_card_and_an_optional_file() {
         assert_eq!(
             parse_words("resume moxi").unwrap(),
-            Command::Resume { card: "moxi".into(), out: None }
+            Command::Resume { card: "moxi".into(), out: None, place: None }
         );
         assert_eq!(
             parse_words("resume moxi --out handoff.md").unwrap(),
-            Command::Resume { card: "moxi".into(), out: Some("handoff.md".into()) }
+            Command::Resume { card: "moxi".into(), out: Some("handoff.md".into()), place: None }
         );
         assert!(matches!(parse_words("resume"), Err(Error::Usage(_))));
     }
@@ -300,5 +327,15 @@ mod tests {
         assert!(matches!(parse_words("edit"), Err(Error::Usage(_))));
         assert!(matches!(parse_words("--nope"), Err(Error::Usage(_))));
         assert!(matches!(parse_words("out --out"), Err(Error::Usage(_))));
+    }
+
+    #[test]
+    fn resume_takes_a_place_and_here_is_a_verb() {
+        assert_eq!(
+            parse_words("resume moxi --place eval").unwrap(),
+            Command::Resume { card: "moxi".into(), out: None, place: Some("eval".into()) }
+        );
+        assert!(parse_words("resume moxi --place").is_err());
+        assert_eq!(parse_words("here").unwrap(), Command::Here);
     }
 }

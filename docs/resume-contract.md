@@ -7,12 +7,19 @@ another, and needs no binary at all. Anything here can be written by hand.
 
 Five decisions, numbered so they can be approved one at a time.
 
+**Books.** Where this document says "the docket store" it means one *book*: a
+folder of cards with `sessions/` inside, exactly as D1 describes it. With
+several books, each has its own `sessions/`, and a card's sessions live in the
+book that holds the card. A command or an agent works inside one book at a
+time; `dk where -b <name>` prints that book's folder, and in Cowork the
+connected folder is the book. Nothing in D1-D5 changes inside a book.
+
 ---
 
 ## D1 — Sessions live in the docket store, as a fur archive
 
 ```
-$DOCKET_HOME/
+<the book>/                          ← $DOCKET_HOME, or a registered book's folder
 ├── moxi.md                          ← cards, as today (top-level *.md only)
 ├── yggdrasil-cli.md
 └── sessions/                        ← a fur project root
@@ -82,6 +89,15 @@ existing card would need one.
 the contents were about two thirds of the resume (7.4k of roughly 11k
 tokens), paid on every resume whether or not the task touched code, and stale
 the moment the code changed.
+- **Places.** A card may live in several folders: `path:` is the primary one,
+  labelled `main`, and each `place: <label> <path>` header line adds another
+  (the label is one word, the path is the rest of the line). With more than
+  one place the `## code` part holds one `### <label> · <path>` subsection per
+  place, `main` first, each built as above from that folder's own `WHITE.md`;
+  `white:` applies to `main` only. A card with one place has no subsections,
+  so a resume written before places existed reads the same. `--place <label>`
+  keeps one subsection. A place whose folder is gone gives its own bracketed
+  line and costs the others nothing.
 - Failures read like the missing-README note, never an omission:
   `[no WHITE.md at …]`, `[ygg not found — install yggdrasil-cli]`,
   `[ygg failed: <first line of stderr>]`.

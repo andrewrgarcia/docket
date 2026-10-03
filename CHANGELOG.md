@@ -17,6 +17,21 @@ follow [Semantic Versioning].
 - Long-form documents: a linked file starting `<!-- dk:doc v1 -->` in a
   card's sessions conversation is listed under `### documents` in
   `RESUME.md` — title, status, cost, date — and never inlined.
+- Books: several separate collections of cards. `dk book` lists them and
+  `new`, `add`, `rm`, `use` manage them; `-b <book>`, `book/card` names and
+  `DOCKET_BOOK` pick one for a command; with two or more books a bare `dk`
+  opens an interactive index (Enter lists a book, `p` picks from it). The
+  first book made registers the existing store as the default. Books are named
+  in `books.toml` in the config directory (`DOCKET_CONFIG`). With no books
+  registered nothing changes. `DOCKET_HOME` still wins over the default book,
+  and `dk book` says so when it is set.
+- Places: a project that lives in several folders (a repo, its issue archive,
+  an eval harness) keeps one card. `path:` stays the primary place, called
+  `main`; extra folders are `place: <label> <path>` lines in the header
+  (`~/` allowed). With more than one place, `dk resume` gives each its own
+  `### <label> · <path>` code index, and `--place <label>` limits it to one.
+  `dk here` prints the card that owns the folder you are in (the deepest place
+  wins). A card with a single place reads exactly as before.
 - `white:` card field — names a `ygg` manifest other than the project's
   `WHITE.md`.
 

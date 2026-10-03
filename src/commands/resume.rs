@@ -11,12 +11,12 @@ use crate::theme::{self, GREEN, GREY, RED, YELLOW};
 /// stdout carries the path written and nothing else, so `cat "$(dk resume
 /// moxi)"` works; what each part cost goes to stderr, where it is seen before
 /// the file is pasted and never ends up in a pipe by accident.
-pub fn run(store: &Store, query: &str, out: Option<&str>) -> Result<()> {
+pub fn run(store: &Store, query: &str, out: Option<&str>, place: Option<&str>) -> Result<()> {
     let card = store.get(query)?;
     let target = PathBuf::from(out.unwrap_or(resume::DEFAULT_FILE));
     refuse_the_store(store, &target)?;
 
-    let built = resume::build(&card, store.root())?;
+    let built = resume::build(&card, store.root(), place)?;
     fs::write(&target, &built.text).map_err(|e| Error::io("write", &target, e))?;
 
     report(&built);

@@ -26,7 +26,7 @@ use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use crate::brief;
-use crate::card::{Card, README_HEADING};
+use crate::card::{Card, Place, MAIN_PLACE, README_HEADING};
 use crate::error::{Error, Result};
 
 pub const DEFAULT_FILE: &str = "RESUME.md";
@@ -47,10 +47,11 @@ pub struct Built {
     pub total: usize,
 }
 
-pub fn build(card: &Card, store_root: &Path) -> Result<Built> {
+/// `place` limits the code part to one of the card's places, by label.
+pub fn build(card: &Card, store_root: &Path, place: Option<&str>) -> Result<Built> {
     let card_part = own_text(card);
     let sessions_part = sessions_section(card, store_root)?;
-    let code_part = code_section(card);
+    let code_part = code_section(card, place)?;
 
     let text = format!(
         "<!-- dk:resume v1 -->\n# RESUME · {}\n\n## card\n\n{card_part}\n\n## sessions\n\n{sessions_part}\n\n## code\n\n{code_part}\n",
@@ -477,17 +478,52 @@ fn marker_attrs(line: &str) -> Option<Vec<(String, String)>> {
 // the code
 // ---------------------------------------------------------------------------
 
-/// The `## code` section: ygg's index of the manifest's files (not their
+/// The `## code` section: ygg's index of each place's manifest files (not their
 /// contents), or a bracketed reason there isn't one.
-fn code_section(card: &Card) -> String {
-    if card.path.is_empty() {
-        return "[no project path — this card is an idea]".to_string();
+///
+/// A card with at most one place reads exactly as it always did. With several,
+/// each place gets a `### <label> · <path>` heading so a reader can tell the
+/// repo from its issue archive; `only` keeps just the one asked for.
+fn code_section(card: &Card, only: Option<&str>) -> Result<String> {
+    let all = card.all_places();
+    if all.is_empty() {
+        return Ok("[no project path — this card is an idea]".to_string());
     }
-    let project = Path::new(&card.path);
+    let chosen: Vec<&Place> = match only {
+        None => all.iter().collect(),
+        Some(label) => {
+            let hit: Vec<&Place> = all.iter().filter(|p| p.label == label).collect();
+            if hit.is_empty() {
+                let known: Vec<&str> = all.iter().map(|p| p.label.as_str()).collect();
+                return Err(Error::usage(format!(
+                    "`{}` has no place `{label}` — its places are {}",
+                    card.name,
+                    known.join(", ")
+                )));
+            }
+            hit
+        }
+    };
+    if all.len() == 1 {
+        return Ok(code_of(&all[0].path, white_field(card)));
+    }
+    let parts: Vec<String> = chosen
+        .iter()
+        .map(|p| {
+            // `white:` names the main place's manifest; the others use their own WHITE.md.
+            let white = if p.label == MAIN_PLACE { white_field(card) } else { None };
+            format!("### {} · {}\n\n{}", p.label, p.path, code_of(&p.path, white))
+        })
+        .collect();
+    Ok(parts.join("\n\n"))
+}
+
+fn code_of(path: &str, white: Option<String>) -> String {
+    let project = Path::new(path);
     if !project.is_dir() {
-        return format!("[project path is gone: {}]", card.path);
+        return format!("[project path is gone: {path}]");
     }
-    let manifest = match white_field(card) {
+    let manifest = match white {
         Some(custom) => {
             let custom = PathBuf::from(custom);
             if custom.is_absolute() {

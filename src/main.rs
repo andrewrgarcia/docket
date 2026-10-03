@@ -19,6 +19,7 @@ mod outline;
 mod pack;
 mod pick;
 mod resume;
+mod shelf;
 mod store;
 mod theme;
 mod ui;

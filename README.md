@@ -121,11 +121,31 @@ becomes `fur-cli`, not `cli`. The filename is the card's identity, so use
 `dk add` with no path makes a card with no `path:`. That is an idea, and
 ideas are first-class here.
 
+## Several folders, one card
+
+A project often lives in more than one place: the repo, its issue archive, an
+eval harness. Keep one card and list the extra folders in its header, under
+`path:`:
+
+```
+path: /home/andrew/moxilang/moxi
+place: issues ~/moxilang/moxi-issues-archive
+place: eval ~/moxi-eval
+```
+
+`path:` is the primary place, called `main`. Each `place:` line is a label (one
+word) and a path (`~/` works). `dk resume moxi` then gives every place its own
+code index under `### <label> · <path>` (each from that folder's own
+`WHITE.md`), and `dk resume moxi --place eval` keeps just one. `dk here`, run
+inside any of the folders, prints the card they belong to, so
+`dk resume "$(dk here)"` works from wherever you are. A card with one place
+behaves as before.
+
 ## Commands
 
 | | |
 |---|---|
-| `dk` | the list |
+| `dk` | the list (with several books: the book index) |
 | `dk show <name>` | read a card (by name, hash, or a prefix of either) |
 | `dk edit <name>` | edit a card in the terminal |
 | `dk code [name]` | open a card in VS Code; no name opens the whole store |
@@ -133,13 +153,16 @@ ideas are first-class here.
 | `dk pick` | browse, choose sections, write `DOCKET.md` (alias `dk tree`) |
 | `dk out` | write every card to `DOCKET.md` |
 | `dk resume <card>` | write `RESUME.md`: the card, its latest sessions, its code |
+| `dk here` | print the card that owns the folder you are in |
 | `dk rename <old> <new>` | rename a card, heading and all |
 | `dk rm <name>` | delete, after you type the name back |
 | `dk where` | print the store path |
+| `dk book` | list your books; `new`, `add`, `rm`, `use` manage them |
 
 `--out <file>` sends `pick`, `out` or `resume` somewhere other than their
-default file. That is the only flag. An unrecognised word is treated as a card name, so `dk moxi`
-works.
+default file, `--place <label>` limits `resume` to one of the card's folders, and `-b <book>` runs one command in a book other than the
+default (see Books). Those are the only flags. An unrecognised word is
+treated as a card name, so `dk moxi` works.
 
 Exit codes: `2` misuse, `3` no such card, `4` name already taken, `1`
 everything else.
@@ -283,11 +306,56 @@ On by default, off when the output is piped, off when `NO_COLOR` is set, off
 when `TERM=dumb`. `dk show moxi > card.md` writes the card, not a screenshot
 of it.
 
+## Books
+
+A book is a store: a folder of cards, with `sessions/` inside. One book is all
+most people need, and it is what you have until you ask for a second. A second
+is for keeping collections apart: personal and work, a team's cards in their
+own git repo, or a demo with nothing private in it.
+
+```bash
+dk book                          # list them: cards, active, newest, path
+dk book new bcrp                 # a new, empty book (or: dk book new bcrp ~/work/bcrp)
+dk book add ~/notes/docket       # register a folder of cards you already have
+dk book use bcrp                 # make it the default
+dk book rm bcrp                  # forget it; the folder is left alone
+```
+
+The first time you make a book, the store you already have is registered too,
+named after its folder, and stays the default, so starting a second collection
+never makes the first one disappear.
+
+With two or more books, a bare `dk` opens the book index: the default is under
+the cursor, Enter shows that book's cards, `p` picks from it, `q` quits. Every
+other command uses the default book unless you say otherwise:
+
+```bash
+dk -b bcrp                       # one command in another book
+dk show bcrp/rates               # a card by book/name
+dk resume bcrp/rates
+DOCKET_BOOK=bcrp dk              # for a whole shell
+```
+
+Nothing remembers which book you looked at last, on purpose: a sticky choice is
+how a card ends up in the wrong collection. The default is the one you set
+with `dk book use`, and every list names its book.
+
+Which book a command uses, first match wins: `-b` or `book/card`,
+`DOCKET_BOOK`, `DOCKET_HOME`, the default book (or the only one), and with no
+books registered, the single store. The books are named in a small file you may
+edit by hand: `~/.config/docket/books.toml` (`DOCKET_CONFIG` points elsewhere).
+
+`DOCKET_HOME` still works and still wins over the default book. That is for
+people with one store who set it long ago. If you use books, do not set it:
+it would hide the others.
+
 ## Where things live
 
 The platform data directory: `~/.local/share/docket`,
 `~/Library/Application Support/docket`, `%APPDATA%\docket`. `dk where` prints
-it. Set `DOCKET_HOME` to move it.
+it. With one store, set `DOCKET_HOME` to move it; with books, register the
+folder you want (`dk book add`). New books made without a path go in
+`docket-books/` beside it.
 
 It is a flat folder of markdown files, one per card, and nothing else. Nothing
 is ever written inside your projects — a card points at a path; it never
@@ -300,13 +368,14 @@ Recommended, and the format was chosen for it.
 ```bash
 mkdir -p ~/notes                     # the parent, not the target
 mv "$(dk where)" ~/notes/docket      # must not already exist, or mv nests it
-echo 'export DOCKET_HOME=~/notes/docket' >> ~/.bashrc
+dk book add ~/notes/docket docket    # tell docket where it went
 cd ~/notes/docket && git init && git add -A && git commit -m "docket store"
 ```
 
 `dk where` prints the current store, so that first move works wherever your
-platform put it. Open a new shell, or `source ~/.bashrc`, before running `dk`
-again.
+platform put it. (`export DOCKET_HOME=~/notes/docket` in your shell profile
+also works for one store, but it overrides every book, so books are the better
+habit.) Each book can be its own git repo.
 
 Your notes are the only copy. There is no undo and `dk rm` is permanent, so
 git turns *gone* into one command back. And because a card is markdown and
@@ -360,7 +429,7 @@ does not check formatting and does not fail on style lints. A red badge means
 something is broken.
 
 The tests are the specification. `tests/cli.rs` drives the real binary against
-a throwaway `DOCKET_HOME`; unit tests cover the buffer, the wrapping, the
+a throwaway `DOCKET_HOME` and books file; unit tests cover the buffer, the wrapping, the
 syntax classes, the card format and the output document. No dev-dependencies.
 
 ## License

@@ -213,6 +213,88 @@ pub fn choose(
     }
 }
 
+/// Whether bare `dk` should show the book index rather than one book's
+/// cards: only when nothing has already chosen a store (no `-b`, no
+/// `DOCKET_BOOK`, no `DOCKET_HOME`) and there is more than one book to choose
+/// from. With one book, or with none, `dk` is the card list it always was.
+pub fn index_wanted(
+    registry: Option<&Registry>,
+    explicit: Option<&str>,
+    book_env: Option<&str>,
+    home_env: Option<&Path>,
+) -> bool {
+    explicit.is_none()
+        && book_env.filter(|b| !b.is_empty()).is_none()
+        && home_env.is_none()
+        && registry.is_some_and(|r| r.books.len() > 1)
+}
+
+/// One book as the index and `dk book` show it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Summary {
+    pub name: String,
+    pub path: PathBuf,
+    pub default: bool,
+    /// `None` when the folder cannot be read — it has moved or gone.
+    pub counts: Option<Counts>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Counts {
+    pub cards: usize,
+    pub active: usize,
+    /// Days since the most recently touched card, if there are any cards.
+    pub newest: Option<u64>,
+}
+
+/// Every registered book, by name. Read-only: this parses the card files
+/// itself rather than going through `Store::cards`, which backfills ids, so
+/// looking at the index never rewrites a card.
+pub fn summaries(registry: &Registry) -> Vec<Summary> {
+    registry
+        .books
+        .iter()
+        .map(|(name, path)| Summary {
+            name: name.clone(),
+            path: path.clone(),
+            default: registry.default.as_deref() == Some(name),
+            counts: counts(path),
+        })
+        .collect()
+}
+
+fn counts(path: &Path) -> Option<Counts> {
+    let entries = fs::read_dir(path).ok()?;
+    let mut cards = 0;
+    let mut active = 0;
+    let mut newest: Option<u64> = None;
+    for entry in entries.flatten() {
+        let file = entry.path();
+        if file.extension().and_then(|e| e.to_str()) != Some("md") {
+            continue;
+        }
+        let Some(stem) = file.file_stem().and_then(|s| s.to_str()) else { continue };
+        let Ok(body) = fs::read_to_string(&file) else { continue };
+        let card = crate::card::Card::parse(stem, &body, 0);
+        cards += 1;
+        if !card.status.is_cold() {
+            active += 1;
+        }
+        let days = crate::card::age_days(&file, &card.path);
+        newest = Some(newest.map_or(days, |n| n.min(days)));
+    }
+    Some(Counts { cards, active, newest })
+}
+
+/// `today`, `3d`, or `-` when a book has no cards.
+pub fn age_label(days: Option<u64>) -> String {
+    match days {
+        None => "-".into(),
+        Some(0) => "today".into(),
+        Some(d) => format!("{d}d"),
+    }
+}
+
 /// `bcrp/moxi` → `(Some("bcrp"), "moxi")`. Card names never contain a slash,
 /// so a slash is a book. Anything whose left half is not a book name (`../x`)
 /// is left alone and fails later as an unknown card, never as a guess.
@@ -351,6 +433,26 @@ mod tests {
         let Err(e) = choose(Some(&r), Some("zz"), None, None) else { panic!("should fail") };
         let msg = e.to_string();
         assert!(msg.contains("zz") && msg.contains("a, b"), "{msg}");
+    }
+
+    #[test]
+    fn the_index_shows_only_when_nothing_has_chosen_and_there_is_a_choice() {
+        let two = reg(Some("a"), &[("a", "/a"), ("b", "/b")]);
+        let one = reg(Some("a"), &[("a", "/a")]);
+        assert!(index_wanted(Some(&two), None, None, None));
+        assert!(!index_wanted(Some(&one), None, None, None));
+        assert!(!index_wanted(None, None, None, None));
+        assert!(!index_wanted(Some(&two), Some("b"), None, None));
+        assert!(!index_wanted(Some(&two), None, Some("b"), None));
+        assert!(index_wanted(Some(&two), None, Some(""), None));
+        assert!(!index_wanted(Some(&two), None, None, Some(Path::new("/h"))));
+    }
+
+    #[test]
+    fn ages_read_as_words() {
+        assert_eq!(age_label(None), "-");
+        assert_eq!(age_label(Some(0)), "today");
+        assert_eq!(age_label(Some(12)), "12d");
     }
 
     #[test]

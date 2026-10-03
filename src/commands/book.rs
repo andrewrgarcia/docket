@@ -2,7 +2,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::books::{self, Registry};
-use crate::card::{age_days, Card};
 use crate::cli::BookCmd;
 use crate::error::{Error, Result};
 use crate::theme::{self, BOLD, DIM, GREEN, RED};
@@ -24,12 +23,27 @@ fn list() -> Result<()> {
         println!("`dk book new <name>` makes a second collection and keeps this one as the default");
         return Ok(());
     };
+    print_list(&registry);
+    warn_about_home();
+    Ok(())
+}
 
-    let rows: Vec<Row> = registry
-        .books
-        .iter()
-        .map(|(name, path)| Row::read(name, path, registry.default.as_deref() == Some(name)))
-        .collect();
+/// `DOCKET_HOME` outranks the default book, so with it set a bare `dk` shows
+/// that one store and never the index. Say so where books are managed, since
+/// that is where the surprise is felt.
+fn warn_about_home() {
+    if let Some(home) = std::env::var_os("DOCKET_HOME") {
+        eprintln!(
+            "note: DOCKET_HOME is set ({}) — it overrides your default book and hides the index. Remove it from your shell profile to let `dk book` decide.",
+            PathBuf::from(home).display()
+        );
+    }
+}
+
+/// The books as plain rows — what `dk book` prints, and what bare `dk` prints
+/// in place of the index when its output is not a terminal.
+pub fn print_list(registry: &Registry) {
+    let rows = books::summaries(registry);
     let name_w = rows.iter().map(|r| r.name.len()).max().unwrap_or(4).max(4);
 
     println!("{}", theme::paint(&format!("  {:<name_w$}  {:>5}  {:>6}  {:>6}  PATH", "NAME", "CARDS", "ACTIVE", "NEWEST"), &[DIM]));
@@ -41,7 +55,7 @@ fn list() -> Result<()> {
                 "{mark} {name}  {:>5}  {:>6}  {:>6}  {}",
                 c.cards,
                 c.active,
-                c.newest.map(age).unwrap_or_else(|| "-".into()),
+                books::age_label(c.newest),
                 theme::paint(&r.path.display().to_string(), &[DIM])
             ),
             None => println!(
@@ -57,56 +71,6 @@ fn list() -> Result<()> {
     if registry.default.is_none() && registry.books.len() > 1 {
         println!("no default: name a book with -b, or `dk book use <name>`");
     }
-    Ok(())
-}
-
-struct Row {
-    name: String,
-    path: PathBuf,
-    default: bool,
-    counts: Option<Counts>,
-}
-
-struct Counts {
-    cards: usize,
-    active: usize,
-    newest: Option<u64>,
-}
-
-impl Row {
-    /// Read-only: listing books must never rewrite a card, so this parses the
-    /// files itself instead of going through `Store::cards`, which backfills
-    /// ids.
-    fn read(name: &str, path: &Path, default: bool) -> Row {
-        Row { name: name.to_string(), path: path.to_path_buf(), default, counts: counts(path) }
-    }
-}
-
-fn counts(path: &Path) -> Option<Counts> {
-    let entries = fs::read_dir(path).ok()?;
-    let mut cards = 0;
-    let mut active = 0;
-    let mut newest: Option<u64> = None;
-    for entry in entries.flatten() {
-        let file = entry.path();
-        if file.extension().and_then(|e| e.to_str()) != Some("md") {
-            continue;
-        }
-        let Some(stem) = file.file_stem().and_then(|s| s.to_str()) else { continue };
-        let Ok(body) = fs::read_to_string(&file) else { continue };
-        let card = Card::parse(stem, &body, 0);
-        cards += 1;
-        if !card.status.is_cold() {
-            active += 1;
-        }
-        let days = age_days(&file, &card.path);
-        newest = Some(newest.map_or(days, |n| n.min(days)));
-    }
-    Some(Counts { cards, active, newest })
-}
-
-fn age(days: u64) -> String {
-    if days == 0 { "today".into() } else { format!("{days}d") }
 }
 
 fn new(name: &str, path: Option<&str>) -> Result<()> {
@@ -170,6 +134,7 @@ fn register(name: &str, folder: &Path) -> Result<()> {
         println!("{note}");
     }
     println!("book `{name}` → {}{}", folder.display(), if registry.default.as_deref() == Some(name) { " (default)" } else { "" });
+    warn_about_home();
     Ok(())
 }
 

@@ -927,8 +927,14 @@ fn the_first_book_keeps_your_existing_store_as_the_default() {
     assert!(made.status.success(), "{}", err(&made));
     assert!(text(&made).contains("your existing store"), "{}", text(&made));
 
-    // From here the registry decides. `dk` still shows the old cards...
-    let list = s.books_ok(&[]);
+    // From here the registry decides. Two books, so bare `dk` is the index
+    // (as text, through a pipe), with the old store marked as the default...
+    let index = s.books_ok(&[]);
+    assert!(index.lines().any(|l| l.starts_with("* store")), "{index}");
+    assert!(index.contains("bcrp"), "{index}");
+    // ...every other command uses that default...
+    assert!(s.books_ok(&["show", "moxi"]).contains("a language"));
+    let list = s.books_ok(&["-b", "store"]);
     assert!(list.contains("moxi") && list.contains("book: store"), "{list}");
     // ...and the new book is empty and named on request.
     let empty = s.books_ok(&["-b", "bcrp"]);
@@ -1021,12 +1027,15 @@ fn several_books_and_no_default_ask_which_one() {
     }
     // `a` became the default; removing it leaves two books and no default.
     s.books_ok(&["book", "rm", "a"]);
-    let out = s.run_books(&[], &[]);
+    let out = s.run_books(&["where"], &[]);
     assert_eq!(out.status.code(), Some(2), "{}", err(&out));
     assert!(err(&out).contains("no default"), "{}", err(&out));
+    // Bare `dk` is the index, which is how you choose; it does not fail.
+    assert!(s.books_ok(&[]).contains("no default"));
 
     s.books_ok(&["book", "use", "b"]);
-    assert!(s.books_ok(&[]).contains("book: b"));
+    let b = fs::canonicalize(&b).unwrap();
+    assert_eq!(s.books_ok(&["where"]).trim_end(), b.to_str().unwrap());
 }
 
 #[test]
@@ -1129,4 +1138,189 @@ fn a_registry_that_cannot_be_read_is_reported_with_its_line() {
     let out = s.run_books(&[], &[]);
     assert_eq!(out.status.code(), Some(1), "{}", err(&out));
     assert!(err(&out).contains("books.toml:2"), "{}", err(&out));
+}
+
+#[test]
+fn bare_dk_with_several_books_is_the_index_and_with_one_is_the_cards() {
+    let s = Sandbox::new();
+    let a = s.folder("a");
+    fs::write(a.join("moxi.md"), CARD).unwrap();
+    s.books_ok(&["book", "add", a.to_str().unwrap(), "a"]);
+    let one = s.books_ok(&[]);
+    assert!(one.contains("moxi") && one.contains("book: a"), "{one}");
+
+    let b = s.folder("b");
+    s.books_ok(&["book", "add", b.to_str().unwrap(), "b"]);
+    let index = s.books_ok(&[]);
+    assert!(index.contains("NAME") && index.lines().any(|l| l.starts_with("* a")), "{index}");
+    assert!(!index.contains("moxi"), "the index lists books, not cards: {index}");
+}
+
+#[test]
+fn anything_that_already_chose_a_book_skips_the_index() {
+    let s = Sandbox::new();
+    let a = s.folder("a");
+    let b = s.folder("b");
+    fs::write(a.join("moxi.md"), CARD).unwrap();
+    s.books_ok(&["book", "add", a.to_str().unwrap(), "a"]);
+    s.books_ok(&["book", "add", b.to_str().unwrap(), "b"]);
+
+    assert!(s.books_ok(&["-b", "a"]).contains("moxi"));
+    let env = s.run_books(&[], &[("DOCKET_BOOK", "a")]);
+    assert!(text(&env).contains("moxi"), "{}", err(&env));
+    // DOCKET_HOME is a store chosen by hand: the plain list, no index.
+    let home = s.run(&[]);
+    assert!(text(&home).contains("no cards yet"), "{}", text(&home));
+}
+
+#[test]
+fn managing_books_warns_when_docket_home_would_hide_them() {
+    let s = Sandbox::new();
+    let a = s.folder("a");
+    // Sandbox::run sets DOCKET_HOME, as an old shell profile would.
+    let with_home = s.run(&["book", "add", a.to_str().unwrap(), "a"]);
+    assert!(with_home.status.success(), "{}", err(&with_home));
+    assert!(err(&with_home).contains("DOCKET_HOME is set"), "{}", err(&with_home));
+    let listed = s.run(&["book"]);
+    assert!(err(&listed).contains("overrides your default book"), "{}", err(&listed));
+
+    let without = s.run_books(&["book"], &[]);
+    assert!(!err(&without).contains("DOCKET_HOME"), "{}", err(&without));
+}
+
+// ---------------------------------------------------------------------------
+// places: one card, several folders
+// ---------------------------------------------------------------------------
+
+fn in_dir(s: &Sandbox, dir: &std::path::Path, args: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_dk"))
+        .args(args)
+        .current_dir(dir)
+        .env("DOCKET_HOME", &s.home)
+        .env("NO_COLOR", "1")
+        .stdin(Stdio::null())
+        .output()
+        .unwrap()
+}
+
+fn two_places(s: &Sandbox) -> (PathBuf, PathBuf) {
+    let main = s.project("moxi-main", &[("WHITE.md", "src/main.rs\n")]);
+    let eval = s.project("moxi-eval", &[("WHITE.md", "harness.py\n")]);
+    resume_card(
+        s,
+        "moxi",
+        &format!("place: eval {}\n", eval.display()),
+        Some(&main),
+    );
+    (main, eval)
+}
+
+#[cfg(unix)]
+#[test]
+fn resume_indexes_every_place_under_its_label() {
+    let s = Sandbox::new();
+    let (main, eval) = two_places(&s);
+    let bin = fake_ygg(&s, RECORDING_YGG);
+
+    let out = run_with_path(&s, &["resume", "moxi"], &bin);
+    assert!(out.status.success(), "{}", err(&out));
+    let text = fs::read_to_string(s.scratch.join("RESUME.md")).unwrap();
+    assert!(text.contains(&format!("### main · {}", main.display())), "{text}");
+    assert!(text.contains(&format!("### eval · {}", eval.display())), "{text}");
+    assert_eq!(text.matches("FAKE CODEX").count(), 2, "{text}");
+    assert!(text.contains("place: eval "), "the card part keeps its place line: {text}");
+}
+
+#[cfg(unix)]
+#[test]
+fn resume_place_limits_the_code_to_one_folder() {
+    let s = Sandbox::new();
+    let (_, eval) = two_places(&s);
+    let bin = fake_ygg(&s, RECORDING_YGG);
+
+    let out = run_with_path(&s, &["resume", "moxi", "--place", "eval"], &bin);
+    assert!(out.status.success(), "{}", err(&out));
+    let text = fs::read_to_string(s.scratch.join("RESUME.md")).unwrap();
+    assert!(text.contains(&format!("### eval · {}", eval.display())), "{text}");
+    assert!(!text.contains("### main"), "{text}");
+    assert_eq!(text.matches("FAKE CODEX").count(), 1, "{text}");
+}
+
+#[test]
+fn resume_names_the_places_when_the_label_is_wrong() {
+    let s = Sandbox::new();
+    two_places(&s);
+    let out = s.run(&["resume", "moxi", "--place", "nope"]);
+    assert_eq!(out.status.code(), Some(2));
+    let said = err(&out);
+    assert!(said.contains("no place `nope`") && said.contains("main, eval"), "{said}");
+}
+
+#[test]
+fn a_card_with_one_place_resumes_without_headings() {
+    let s = Sandbox::new();
+    let project = s.project("moxi-proj", &[]);
+    resume_card(&s, "moxi", "", Some(&project));
+    let text = resumed(&s, "moxi");
+    assert!(!text.contains("### main"), "{text}");
+    assert!(text.contains("[no WHITE.md at "), "{text}");
+}
+
+#[test]
+fn a_gone_place_is_reported_without_losing_the_others() {
+    let s = Sandbox::new();
+    let main = s.project("moxi-main", &[]);
+    resume_card(&s, "moxi", "place: eval /nonexistent/moxi-eval\n", Some(&main));
+    let text = resumed(&s, "moxi");
+    assert!(text.contains("[no WHITE.md at "), "{text}");
+    assert!(text.contains("### eval · /nonexistent/moxi-eval\n\n[project path is gone: /nonexistent/moxi-eval]"), "{text}");
+}
+
+#[test]
+fn here_finds_the_card_from_any_of_its_places() {
+    let s = Sandbox::new();
+    let (main, eval) = two_places(&s);
+    let nested = eval.join("tasks");
+    fs::create_dir_all(&nested).unwrap();
+
+    for dir in [&main, &eval, &nested] {
+        let out = in_dir(&s, dir, &["here"]);
+        assert!(out.status.success(), "{}: {}", dir.display(), err(&out));
+        assert_eq!(String::from_utf8_lossy(&out.stdout), "moxi\n");
+    }
+    let out = in_dir(&s, &eval, &["here"]);
+    assert!(err(&out).contains("in place: eval"), "{}", err(&out));
+}
+
+#[test]
+fn here_in_an_unclaimed_folder_exits_three() {
+    let s = Sandbox::new();
+    two_places(&s);
+    let stranger = s.project("elsewhere", &[]);
+    let out = in_dir(&s, &stranger, &["here"]);
+    assert_eq!(out.status.code(), Some(3), "{}", err(&out));
+    assert!(out.stdout.is_empty());
+}
+
+#[test]
+fn here_prefers_the_deepest_place() {
+    let s = Sandbox::new();
+    let outer = s.project("outer", &[]);
+    let inner = outer.join("inner");
+    fs::create_dir_all(&inner).unwrap();
+    s.card("outer", &format!("# outer\nid: aaaaaaaa\npath: {}\n", outer.display()));
+    s.card("inner", &format!("# inner\nid: bbbbbbbb\npath: {}\n", inner.display()));
+    let out = in_dir(&s, &inner, &["here"]);
+    assert_eq!(String::from_utf8_lossy(&out.stdout), "inner\n", "{}", err(&out));
+}
+
+#[test]
+fn here_refuses_two_cards_claiming_the_same_folder() {
+    let s = Sandbox::new();
+    let dir = s.project("shared", &[]);
+    s.card("one", &format!("# one\nid: aaaaaaaa\npath: {}\n", dir.display()));
+    s.card("two", &format!("# two\nid: bbbbbbbb\nplace: x {}\n", dir.display()));
+    let out = in_dir(&s, &dir, &["here"]);
+    assert_eq!(out.status.code(), Some(3));
+    assert!(err(&out).contains("one, two"), "{}", err(&out));
 }

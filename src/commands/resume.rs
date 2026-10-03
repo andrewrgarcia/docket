@@ -13,6 +13,14 @@ use crate::theme::{self, GREEN, GREY, RED, YELLOW};
 /// the file is pasted and never ends up in a pipe by accident.
 pub fn run(store: &Store, query: &str, out: Option<&str>, place: Option<&str>) -> Result<()> {
     let card = store.get(query)?;
+    // `--out -`: the file's text on stdout, for a shell that reads it straight
+    // into a session. The cost report still goes to stderr.
+    if out == Some("-") {
+        let built = resume::build(&card, store.root(), place)?;
+        report(&built);
+        print!("{}", built.text);
+        return Ok(());
+    }
     let target = PathBuf::from(out.unwrap_or(resume::DEFAULT_FILE));
     refuse_the_store(store, &target)?;
 

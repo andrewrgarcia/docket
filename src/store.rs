@@ -8,6 +8,10 @@ use crate::card::{age_days, Card, README_HEADING};
 use crate::id;
 use crate::error::{Error, Result};
 
+/// Where `snapshot` keeps the previous version of a card. A folder, so it is
+/// never read as a card.
+pub const UNDO_DIR: &str = ".undo";
+
 /// A directory of markdown files. Nothing else lives here, nothing is
 /// cached, and no state is kept beside the cards themselves.
 #[derive(Debug)]
@@ -194,6 +198,32 @@ impl Store {
             let _ = file.set_modified(stamp);
         }
         Ok(())
+    }
+
+    /// Keep the card as it is now in `.undo/<name>.md`, before a command that
+    /// writes without an editor changes it. One level deep: the newest write is
+    /// the one worth taking back, and `dk undo` swaps, so it can be undone too.
+    pub fn snapshot(&self, name: &str) -> Result<()> {
+        let from = self.card_path(name);
+        let dir = self.root.join(UNDO_DIR);
+        fs::create_dir_all(&dir).map_err(|e| Error::io("create", &dir, e))?;
+        let to = dir.join(format!("{name}.md"));
+        fs::copy(&from, &to).map_err(|e| Error::io("copy", &from, e))?;
+        Ok(())
+    }
+
+    /// Swap the card with its snapshot. `false` when there is none.
+    pub fn undo(&self, name: &str) -> Result<bool> {
+        let saved = self.root.join(UNDO_DIR).join(format!("{name}.md"));
+        if !saved.is_file() {
+            return Ok(false);
+        }
+        let card = self.card_path(name);
+        let before = fs::read_to_string(&saved).map_err(|e| Error::io("read", &saved, e))?;
+        let now = fs::read_to_string(&card).map_err(|e| Error::io("read", &card, e))?;
+        fs::write(&saved, now).map_err(|e| Error::io("write", &saved, e))?;
+        fs::write(&card, before).map_err(|e| Error::io("write", &card, e))?;
+        Ok(true)
     }
 
     pub fn delete(&self, name: &str) -> Result<()> {

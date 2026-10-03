@@ -6,6 +6,22 @@ follow [Semantic Versioning].
 ## [Unreleased]
 
 ### Added
+- Writing without an editor, for scripts and AI sessions: `dk set <card> <key>
+  <value>` (a header field, `place <label> <path>` by label, or `state` in
+  `## now`), `dk todo` (an open box at the end of `## next`, bulleted or not to match the boxes already there), `dk tick` (the one
+  open box containing the text; two candidates is an error that lists them),
+  `dk note` (a paragraph in `## notes`, or `--section <heading>`, made if
+  missing), `dk write` (a whole card from a file or stdin, id kept). A text of
+  `-` is read from stdin. None of them touches `## readme`.
+- `dk undo <card>`: each writing verb keeps the previous version in `.undo/`;
+  undo swaps it back, so undoing twice is redo.
+- `dk save <card> <entry|->`: ends a session per the Salvation spec — checks
+  the entry's shape, finds or creates the card's sessions conversation, names
+  `SES-`/`DOC-` files, appends fur markers, sets the card's `state:` from the
+  entry, applies `--tick`/`--next`, and reads everything back. `--doc` adds
+  documents (an existing one is revised in place, no new marker); `--dry-run`
+  writes nothing. Validation happens before any write.
+- `dk resume --out -` prints `RESUME.md` to stdout.
 - `dk resume <card>` — writes `RESUME.md`: the card's own sections, the newest
   three session entries whole with older ones as an index line each, and the
   index `ygg` makes of the project's `WHITE.md` (which files, how big, not

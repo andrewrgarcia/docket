@@ -1324,3 +1324,144 @@ fn here_refuses_two_cards_claiming_the_same_folder() {
     assert_eq!(out.status.code(), Some(3));
     assert!(err(&out).contains("one, two"), "{}", err(&out));
 }
+
+// ---------------------------------------------------------------------------
+// writing without an editor, and ending a session — the loop an AI runs
+// ---------------------------------------------------------------------------
+
+#[test]
+fn the_writing_verbs_change_one_thing_each_and_undo_swaps_back() {
+    let s = Sandbox::new();
+    resume_card(&s, "moxi", "", None);
+    let before = s.read("moxi");
+
+    s.stdout(&["set", "moxi", "status", "paused"]);
+    s.stdout(&["set", "moxi", "place", "paper", "~/papers/x"]);
+    s.stdout(&["set", "moxi", "state", "P0", "done"]);
+    s.stdout(&["todo", "moxi", "write", "the", "intro"]);
+    s.stdout(&["tick", "moxi", "M2"]);
+    s.stdout(&["note", "moxi", "the", "game", "is", "the", "dev", "set"]);
+    let out = s.run_with_stdin(&["note", "moxi", "--section", "decisions", "-"], "one paper,\ntwo studies\n");
+    assert!(out.status.success(), "{}", err(&out));
+
+    let card = s.read("moxi");
+    assert!(card.contains("status: paused\n"), "{card}");
+    assert!(card.contains("place: paper ~/papers/x\n\n## now"), "{card}");
+    assert!(card.contains("## now\nstate: P0 done\nparser"), "{card}");
+    assert!(card.contains("[x] M2\n[ ] write the intro\n"), "{card}");
+    assert!(card.contains("## notes\nthe game is the dev set\n"), "{card}");
+    assert!(card.contains("## decisions\none paper,\ntwo studies\n"), "{card}");
+    assert!(card.contains(&format!("id: {CARD_ID}")), "the id never moves");
+
+    // One level of undo, and undo of undo is redo.
+    s.stdout(&["undo", "moxi"]);
+    assert!(!s.read("moxi").contains("## decisions"));
+    s.stdout(&["undo", "moxi"]);
+    assert!(s.read("moxi").contains("## decisions"));
+
+    // A whole-card rewrite keeps the id even when the new text leaves it out.
+    let out = s.run_with_stdin(&["write", "moxi", "-"], "# moxi\nstatus: active\nwhat: new\n\n## now\nfresh\n");
+    assert!(out.status.success(), "{}", err(&out));
+    assert!(s.read("moxi").starts_with(&format!("# moxi\nid: {CARD_ID}\nstatus: active")));
+    let out = s.run_with_stdin(&["write", "moxi", "-"], "# moxi\nid: deadbeef\n");
+    assert!(!out.status.success(), "a different id is refused");
+    s.stdout(&["undo", "moxi"]);
+    assert_ne!(s.read("moxi"), before, "undo went back one step, not to the start");
+}
+
+#[test]
+fn tick_refuses_to_guess_and_leaves_the_card_alone() {
+    let s = Sandbox::new();
+    resume_card(&s, "moxi", "", None);
+    s.stdout(&["todo", "moxi", "M2b"]);
+    let before = s.read("moxi");
+    let out = s.run(&["tick", "moxi", "M"]);
+    assert!(!out.status.success());
+    assert!(err(&out).contains("2 open boxes"), "{}", err(&out));
+    assert_eq!(s.read("moxi"), before);
+    assert!(!s.run(&["note", "moxi", "--section", "readme", "x"]).status.success());
+}
+
+#[test]
+fn save_creates_the_conversation_writes_back_the_card_and_resume_reads_it() {
+    let s = Sandbox::new();
+    resume_card(&s, "moxi", "", None);
+    let entry_file = s.scratch.join("entry.md");
+    // No marker line: save adds it.
+    fs::write(&entry_file, entry("first", "P1 · sonnet medium · tests").replace("<!-- dk:session v1 -->\n", "")).unwrap();
+    let doc_file = s.scratch.join("plan.md");
+    fs::write(&doc_file, "# The v2 plan\nstatus: draft\n\nwhy\n").unwrap();
+
+    let dry = s.run(&["save", "moxi", entry_file.to_str().unwrap(), "--dry-run"]);
+    assert!(dry.status.success(), "{}", err(&dry));
+    assert!(!s.home.join("sessions").exists(), "a dry run writes nothing");
+
+    let out = s.run(&[
+        "save", "moxi", entry_file.to_str().unwrap(),
+        "--doc", doc_file.to_str().unwrap(),
+        "--tick", "M2", "--next", "write the intro",
+    ]);
+    assert!(out.status.success(), "{}", err(&out));
+    let written: Vec<String> = String::from_utf8_lossy(&out.stdout).lines().map(String::from).collect();
+    assert_eq!(written.len(), 2, "{written:?}");
+    assert!(written[0].contains("DOC-") && written[0].ends_with("-the-v2-plan.md"), "{written:?}");
+    assert!(written[1].contains("/SES-"), "{written:?}");
+
+    let chats = s.home.join("sessions").join("chats");
+    let folders: Vec<_> = fs::read_dir(&chats).unwrap().map(|e| e.unwrap().path()).collect();
+    assert_eq!(folders.len(), 1);
+    let spine = fs::read_to_string(folders[0].join("convo.md")).unwrap();
+    assert!(spine.contains(&format!("  - dk-{CARD_ID}\n")), "{spine}");
+    let markers: Vec<&str> = spine.lines().filter(|l| l.starts_with("<!-- fur:msg")).collect();
+    assert_eq!(markers.len(), 2);
+    assert!(markers[0].contains("link=DOC-") && markers[1].contains("link=SES-"), "doc before entry");
+    assert!(fs::read_to_string(&written[1]).unwrap().starts_with("<!-- dk:session v1 -->\n# moxi"));
+
+    let card = s.read("moxi");
+    assert!(card.contains("## now\nstate: M1\n"), "{card}");
+    assert!(card.contains("[x] M2\n[ ] write the intro\n"), "{card}");
+
+    // A second save appends to the same conversation; resume shows it first.
+    let second = s.run_with_stdin(&["save", "moxi", "-"], &entry("second", "P2"));
+    assert!(second.status.success(), "{}", err(&second));
+    let spine = fs::read_to_string(folders[0].join("convo.md")).unwrap();
+    assert_eq!(spine.lines().filter(|l| l.starts_with("<!-- fur:msg")).count(), 3);
+    let text = String::from_utf8_lossy(&s.run(&["resume", "moxi", "--out", "-"]).stdout).into_owned();
+    let (second_at, first_at) = (text.find("# moxi · second").unwrap(), text.find("# moxi · first").unwrap());
+    assert!(second_at < first_at, "newest first: {text}");
+    assert!(text.contains("### documents") && text.contains("The v2 plan"), "{text}");
+    assert!(!s.scratch.join("RESUME.md").exists(), "--out - writes no file");
+}
+
+#[test]
+fn save_checks_everything_before_writing_anything() {
+    let s = Sandbox::new();
+    resume_card(&s, "moxi", "", None);
+    let before = s.read("moxi");
+    // A bad --tick stops the save.
+    let out = s.run_with_stdin(&["save", "moxi", "-", "--tick", "no such box"], &entry("x", "y"));
+    assert!(!out.status.success());
+    // A malformed entry names what is missing.
+    let broken = entry("x", "y").replace("## blockers\nnone\n\n", "");
+    let out = s.run_with_stdin(&["save", "moxi", "-"], &broken);
+    assert!(!out.status.success());
+    assert!(err(&out).contains("## blockers"), "{}", err(&out));
+    assert!(!s.home.join("sessions").exists());
+    assert_eq!(s.read("moxi"), before);
+}
+
+#[test]
+fn save_revises_a_document_in_place_without_a_new_marker() {
+    let s = Sandbox::new();
+    resume_card(&s, "moxi", "", None);
+    let dir = sessions(&s, "moxi-sessions-3f2a91c4", &format!("dk-{CARD_ID}"), &[
+        ("DOC-20261001-plan.md", "<!-- dk:doc v1 -->\n# Plan\nstatus: draft\n".into()),
+    ]);
+    let revised = s.scratch.join("DOC-20261001-plan.md");
+    fs::write(&revised, "# Plan\nstatus: adopted\n").unwrap();
+    let out = s.run_with_stdin(&["save", "moxi", "-", "--doc", revised.to_str().unwrap()], &entry("x", "y"));
+    assert!(out.status.success(), "{}", err(&out));
+    let spine = fs::read_to_string(dir.join("convo.md")).unwrap();
+    assert_eq!(spine.matches("link=DOC-20261001-plan.md").count(), 1, "{spine}");
+    assert!(fs::read_to_string(dir.join("DOC-20261001-plan.md")).unwrap().contains("status: adopted"));
+}

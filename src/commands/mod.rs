@@ -8,7 +8,9 @@ mod out;
 mod remove;
 mod rename;
 mod resume;
+mod save;
 mod show;
+pub(crate) mod write;
 
 use crate::books;
 use crate::cli::{Command, HELP};
@@ -89,6 +91,37 @@ pub fn dispatch(command: Command, book: Option<String>) -> Result<()> {
             resume::run(&Store::open(b)?, card, out.as_deref(), place.as_deref())
         }
         Command::Here => here::run(&Store::open(flag)?),
+        Command::Set { card, key, value } => {
+            let (b, card) = scope(flag, &card)?;
+            write::set(&Store::open(b)?, card, &key, &value)
+        }
+        Command::Todo { card, text } => {
+            let (b, card) = scope(flag, &card)?;
+            write::todo(&Store::open(b)?, card, &text)
+        }
+        Command::Tick { card, text } => {
+            let (b, card) = scope(flag, &card)?;
+            write::tick(&Store::open(b)?, card, &text)
+        }
+        Command::Note { card, section, text } => {
+            let (b, card) = scope(flag, &card)?;
+            write::note(&Store::open(b)?, card, section.as_deref(), &text)
+        }
+        Command::Write { card, source } => {
+            let (b, card) = scope(flag, &card)?;
+            write::write(&Store::open(b)?, card, &source)
+        }
+        Command::Undo(card) => {
+            let (b, card) = scope(flag, &card)?;
+            write::undo(&Store::open(b)?, card)
+        }
+        Command::Save { card, entry, docs, ticks, nexts, dry_run } => {
+            let (b, card) = scope(flag, &card)?;
+            save::run(
+                &Store::open(b)?,
+                &save::Request { card, entry: &entry, docs: &docs, ticks: &ticks, nexts: &nexts, dry_run },
+            )
+        }
     }
 }
 

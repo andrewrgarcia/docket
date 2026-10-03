@@ -158,10 +158,17 @@ behaves as before.
 | `dk rm <name>` | delete, after you type the name back |
 | `dk where` | print the store path |
 | `dk book` | list your books; `new`, `add`, `rm`, `use` manage them |
+| `dk set <name> <key> <value>` | set a header field, or `state` in `## now` |
+| `dk todo <name> <text>` | add an open `[ ]` box to `## next`, in the style of the ones there |
+| `dk tick <name> <text>` | tick the one open box containing the text |
+| `dk note <name> <text>` | add a paragraph to `## notes` (`--section` for another) |
+| `dk write <name> [file\|-]` | replace the whole card, keeping its id |
+| `dk undo <name>` | put back the card as it was before the last of these |
+| `dk save <name> <entry\|->` | end a session: the entry into the archive, the state onto the card |
 
 `--out <file>` sends `pick`, `out` or `resume` somewhere other than their
-default file, `--place <label>` limits `resume` to one of the card's folders, and `-b <book>` runs one command in a book other than the
-default (see Books). Those are the only flags. An unrecognised word is
+default file (`resume --out -` prints it), `--place <label>` limits `resume` to one of the card's folders, and `-b <book>` runs one command in a book other than the
+default (see Books). `dk save` has its own (see Sessions, from a shell). An unrecognised word is
 treated as a card name, so `dk moxi` works.
 
 Exit codes: `2` misuse, `3` no such card, `4` name already taken, `1`
@@ -255,11 +262,44 @@ resume. The README is not listed — put `README.md` in `WHITE.md` if you want i
 prints to stderr before you paste it.
 
 Sessions are [fur](https://github.com/fur-labs/fur-cli) conversations kept in
-`sessions/` inside the store and tagged `dk-<card id>`; docket reads them and
-never writes them. Long-form documents kept there (plans, option analyses) are
+`sessions/` inside the store and tagged `dk-<card id>`. Long-form documents kept there (plans, option analyses) are
 listed by name, title, status and cost, never inlined. Whatever ends a session — you, Claude Code, a Cowork run —
-saves an entry there. The format, and what an entry must contain, is
-[docs/resume-contract.md](https://github.com/andrewrgarcia/docket/blob/main/docs/resume-contract.md).
+saves an entry there, with `dk save` or by hand. The format, and what an entry must contain, is the
+[Salvation spec](https://github.com/andrewrgarcia/salvation/blob/main/SPEC.md).
+
+`dk resume moxi --out -` prints the file instead of writing it, for an agent
+that reads it straight from the shell.
+
+## Sessions, from a shell
+
+An agent with a shell — Claude Code, a Cowork session with a terminal, Codex —
+can keep a card current and close a session without anyone opening an editor:
+
+```bash
+dk set moxi state "P0 pipeline · render task done, glTF step remaining"
+dk todo moxi "emissive materials → MTL Ke"
+dk tick moxi "P0 pipeline"
+dk note moxi "obj2gltf keeps one node per part"        # ## notes
+dk note moxi --section "open questions" "which model for v2?"
+
+dk save moxi entry.md --doc plan.md --tick "P0 pipeline" --next "P1 materials"
+cat entry.md | dk save moxi -                          # stdin works too
+```
+
+`dk save` checks the entry has its title and all seven sections in order (and
+adds the `<!-- dk:session v1 -->` line if it was left off), finds the card's
+sessions conversation by its tag or creates it, names the files
+(`SES-<UTC stamp>.md`; a document keeps a `DOC-YYYYMMDD-slug.md` name or gets
+one from its title, and a document already there is revised in place), appends
+one fur marker per new file, sets the card's `state:` from the entry's
+`## state`, ticks and adds what the flags say, and reads every file back. A bad
+`--tick` or a malformed entry stops it before anything is written.
+`--dry-run` says what it would do.
+
+Every one of these keeps the card's previous version in `.undo/` inside the
+store; `dk undo moxi` swaps it back (and again, forward). `dk write moxi -`
+replaces a whole card from stdin and keeps its id. None of them ever touches
+`## readme`, and `rm` still makes you type the name.
 
 Anything missing shows up as a bracketed line, never as silence: `[no WHITE.md
 at …]`, `[ygg not found — install yggdrasil-cli]`, `[no sessions yet]`. A card
@@ -404,15 +444,16 @@ gives you a conflict you can see.
 files.
 
 **Not agent memory.** No daemon, no MCP server, no session capture, no
-retrieval. `dk resume` reads session entries that something else wrote; it
-never records one. You choose what the model sees, by hand, every time.
+retrieval. `dk save` files an entry someone wrote; it never decides what goes
+in one. You choose what the model sees, every time.
 
 **Not a task manager.** No due dates, no priorities, no boards.
 
 **Not clever.** No tags, no search, no sync. At twenty cards, `dk` prints
 twenty lines and your eyes do the searching.
 
-There is no undo. `rm` makes you type the name for that reason.
+Undo is one step deep and covers the writing verbs (`set`, `todo`, `tick`,
+`note`, `write`, `save`). `rm` has none, which is why it makes you type the name.
 
 ## Development
 

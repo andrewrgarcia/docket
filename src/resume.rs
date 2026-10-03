@@ -10,9 +10,9 @@
 //! 3. **the code** — the index `ygg` makes of the project's `WHITE.md`: which
 //!    files, how big. The files themselves are opened when a task needs them.
 //!
-//! It only reads. Session entries are written by whoever ends a session (a
-//! Cowork run, Claude Code, you by hand), straight into a fur archive under
-//! `<store>/sessions/`; docket never writes there and never calls fur.
+//! It only reads. Session entries are written by whoever ends a session —
+//! `dk save` (see `ledger.rs`), or a Cowork run or you by hand — into a fur
+//! archive under `<store>/sessions/`. docket never calls fur.
 //!
 //! Nothing here fails quietly. A missing manifest, a missing `ygg`, a session
 //! file that is gone — each becomes a bracketed line in the output, the same
@@ -96,10 +96,10 @@ fn white_field(card: &Card) -> Option<String> {
 // ---------------------------------------------------------------------------
 
 /// One conversation in the sessions archive, read whole.
-struct Conversation {
-    folder: String,
-    dir: PathBuf,
-    text: String,
+pub(crate) struct Conversation {
+    pub(crate) folder: String,
+    pub(crate) dir: PathBuf,
+    pub(crate) text: String,
 }
 
 /// One session entry: the file's stem and its text.
@@ -181,7 +181,7 @@ fn sessions_section(card: &Card, store_root: &Path) -> Result<String> {
 
 /// Every conversation under `chats/` whose front matter carries `tag`, in folder
 /// order. A missing `chats/` is simply no conversations.
-fn conversations_tagged(chats: &Path, tag: &str) -> Result<Vec<Conversation>> {
+pub(crate) fn conversations_tagged(chats: &Path, tag: &str) -> Result<Vec<Conversation>> {
     let listing = match fs::read_dir(chats) {
         Ok(listing) => listing,
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
@@ -419,7 +419,7 @@ fn unquote(raw: &str) -> String {
 /// The `key=value` pairs of a `<!-- fur:msg … -->` line, or `None` if the line
 /// is not one. Values are bare or double-quoted with backslash escapes, which is
 /// how fur's own writer quotes them.
-fn marker_attrs(line: &str) -> Option<Vec<(String, String)>> {
+pub(crate) fn marker_attrs(line: &str) -> Option<Vec<(String, String)>> {
     let rest = line.trim().strip_prefix("<!-- fur:msg")?;
     let rest = rest.trim_end();
     let rest = rest.strip_suffix("-->").unwrap_or(rest);

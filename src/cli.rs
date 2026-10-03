@@ -17,6 +17,24 @@ dk — every project and idea you have, in one list.
   dk rm <name>          delete a card
   dk where              print the store path
 
+Writing without an editor (for scripts and AI sessions; each keeps the old
+version, and `dk undo <name>` swaps it back):
+  dk set <name> <key> <value>   a header field (status, what, path, white,
+                                `place <label> <path>`), or `state` in ## now
+  dk todo <name> <text>         add an open box to ## next
+  dk tick <name> <text>         tick the one open box containing text
+  dk note <name> <text>         add a paragraph to ## notes
+                                (--section <heading> for another section)
+  dk write <name> [file|-]      replace the whole card (its id is kept)
+  dk undo <name>                put back the version before the last write
+  dk save <name> <entry|->      end a session: write the entry into the card's
+                                sessions archive and set the card's state
+     --doc <file>               …with a long-form document (repeatable)
+     --tick <text>              …ticking a box on the card (repeatable)
+     --next <text>              …adding an item to ## next (repeatable)
+     --dry-run                  say what would be written, write nothing
+  A text of `-` is read from stdin.
+
   dk book               list your books (separate collections of cards)
   dk book new <name> [path]    make a book and register it
   dk book add <path> [name]    register a folder of cards as a book
@@ -24,6 +42,7 @@ dk — every project and idea you have, in one list.
   dk book use <name>    make a book the default
 
   --out <file>           with pick, out or resume: write somewhere else
+                         (resume --out - prints to stdout)
   --place <label>        with resume: only that place's code (see `place:` below)
   -b, --book <name>      use this book for one command (or write `name/card`)
 
@@ -49,6 +68,20 @@ pub enum Command {
     Remove(String),
     Resume { card: String, out: Option<String>, place: Option<String> },
     Here,
+    Set { card: String, key: String, value: String },
+    Todo { card: String, text: String },
+    Tick { card: String, text: String },
+    Note { card: String, section: Option<String>, text: String },
+    Write { card: String, source: String },
+    Undo(String),
+    Save {
+        card: String,
+        entry: String,
+        docs: Vec<String>,
+        ticks: Vec<String>,
+        nexts: Vec<String>,
+        dry_run: bool,
+    },
     Book(BookCmd),
     Help,
     Version,
@@ -83,6 +116,11 @@ where
     let args: Vec<String> = args.into_iter().collect();
     let (rest, out) = take_out(&args)?;
     let (rest, place) = take_place(&rest)?;
+    let (rest, docs) = take_many(&rest, "--doc")?;
+    let (rest, ticks) = take_many(&rest, "--tick")?;
+    let (rest, nexts) = take_many(&rest, "--next")?;
+    let (rest, sections) = take_many(&rest, "--section")?;
+    let (rest, dry_run) = take_switch(&rest, "--dry-run");
 
     let Some((verb, operands)) = rest.split_first() else {
         return Ok(Command::List);
@@ -95,7 +133,58 @@ where
             .ok_or_else(|| Error::usage(format!("missing name — try `dk {usage}`")))
     };
 
-    match verb.as_str() {
+    let verb_name = verb.as_str();
+    let for_save = !docs.is_empty() || !ticks.is_empty() || !nexts.is_empty() || dry_run;
+    if for_save && verb_name != "save" {
+        return Err(Error::usage("--doc, --tick, --next and --dry-run go with `dk save`"));
+    }
+    if !sections.is_empty() && verb_name != "note" {
+        return Err(Error::usage("--section goes with `dk note`"));
+    }
+    if sections.len() > 1 {
+        return Err(Error::usage("one --section at a time"));
+    }
+    // The card, then the rest of the words as one text.
+    let card_and_text = |usage: &str| -> Result<(String, String)> {
+        match operands {
+            [card, rest @ ..] if !rest.is_empty() => Ok((card.clone(), rest.join(" "))),
+            _ => Err(Error::usage(format!("try `dk {usage}`"))),
+        }
+    };
+
+    match verb_name {
+        "set" => match operands {
+            [card, key, rest @ ..] if !rest.is_empty() => Ok(Command::Set {
+                card: card.clone(),
+                key: key.clone(),
+                value: rest.join(" "),
+            }),
+            _ => Err(Error::usage("try `dk set <name> <key> <value>`")),
+        },
+        "todo" => card_and_text("todo <name> <text>").map(|(card, text)| Command::Todo { card, text }),
+        "tick" => card_and_text("tick <name> <text>").map(|(card, text)| Command::Tick { card, text }),
+        "note" => card_and_text("note <name> <text>").map(|(card, text)| Command::Note {
+            card,
+            section: sections.into_iter().next(),
+            text,
+        }),
+        "write" => match operands {
+            [card] => Ok(Command::Write { card: card.clone(), source: "-".into() }),
+            [card, source] => Ok(Command::Write { card: card.clone(), source: source.clone() }),
+            _ => Err(Error::usage("try `dk write <name> [file|-]`")),
+        },
+        "undo" => Ok(Command::Undo(one("undo <name>")?)),
+        "save" => match operands {
+            [card, entry] => Ok(Command::Save {
+                card: card.clone(),
+                entry: entry.clone(),
+                docs,
+                ticks,
+                nexts,
+                dry_run,
+            }),
+            _ => Err(Error::usage("try `dk save <name> <entry.md|->`")),
+        },
         "help" | "-h" | "--help" => Ok(Command::Help),
         "-V" | "--version" => Ok(Command::Version),
         "show" => Ok(Command::Show(one("show <name>")?)),
@@ -165,6 +254,31 @@ fn take_book(args: &[String]) -> Result<(Vec<String>, Option<String>)> {
         }
     }
     Ok((rest, book))
+}
+
+/// Pull every `<flag> <value>` out of the arguments, in order.
+fn take_many(args: &[String], flag: &str) -> Result<(Vec<String>, Vec<String>)> {
+    let mut rest = Vec::with_capacity(args.len());
+    let mut values = Vec::new();
+    let mut iter = args.iter();
+    while let Some(arg) = iter.next() {
+        if arg == flag {
+            let value = iter
+                .next()
+                .ok_or_else(|| Error::usage(format!("{flag} needs a value")))?;
+            values.push(value.clone());
+        } else {
+            rest.push(arg.clone());
+        }
+    }
+    Ok((rest, values))
+}
+
+/// Pull a bare switch out of the arguments; `true` if it was there.
+fn take_switch(args: &[String], flag: &str) -> (Vec<String>, bool) {
+    let rest: Vec<String> = args.iter().filter(|a| *a != flag).cloned().collect();
+    let found = rest.len() != args.len();
+    (rest, found)
 }
 
 /// Pull `--place <label>` out of the arguments wherever it sits.
@@ -327,6 +441,52 @@ mod tests {
         assert!(matches!(parse_words("edit"), Err(Error::Usage(_))));
         assert!(matches!(parse_words("--nope"), Err(Error::Usage(_))));
         assert!(matches!(parse_words("out --out"), Err(Error::Usage(_))));
+    }
+
+    #[test]
+    fn the_writing_verbs_take_a_card_and_the_rest_as_text() {
+        assert_eq!(
+            parse_words("set moxi status paused").unwrap(),
+            Command::Set { card: "moxi".into(), key: "status".into(), value: "paused".into() }
+        );
+        assert_eq!(
+            parse_words("set moxi state P0 done").unwrap(),
+            Command::Set { card: "moxi".into(), key: "state".into(), value: "P0 done".into() }
+        );
+        assert_eq!(
+            parse_words("todo moxi write the intro").unwrap(),
+            Command::Todo { card: "moxi".into(), text: "write the intro".into() }
+        );
+        assert_eq!(
+            parse_words("note moxi --section open questions? a b").unwrap(),
+            Command::Note { card: "moxi".into(), section: Some("open".into()), text: "questions? a b".into() }
+        );
+        assert_eq!(
+            parse_words("write moxi").unwrap(),
+            Command::Write { card: "moxi".into(), source: "-".into() }
+        );
+        assert_eq!(parse_words("undo moxi").unwrap(), Command::Undo("moxi".into()));
+        assert!(parse_words("set moxi status").is_err());
+        assert!(parse_words("todo moxi").is_err());
+        assert!(parse_words("tick").is_err());
+    }
+
+    #[test]
+    fn save_collects_its_repeatable_flags() {
+        assert_eq!(
+            parse_words("save moxi e.md --doc a.md --tick x --next y --doc b.md --dry-run").unwrap(),
+            Command::Save {
+                card: "moxi".into(),
+                entry: "e.md".into(),
+                docs: vec!["a.md".into(), "b.md".into()],
+                ticks: vec!["x".into()],
+                nexts: vec!["y".into()],
+                dry_run: true,
+            }
+        );
+        assert!(parse_words("save moxi").is_err());
+        assert!(parse_words("show moxi --tick x").is_err(), "save's flags belong to save");
+        assert!(parse_words("todo moxi x --section notes").is_err());
     }
 
     #[test]

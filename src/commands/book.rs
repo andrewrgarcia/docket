@@ -45,21 +45,31 @@ fn warn_about_home() {
 pub fn print_list(registry: &Registry) {
     let rows = books::summaries(registry);
     let name_w = rows.iter().map(|r| r.name.len()).max().unwrap_or(4).max(4);
+    let hashes: Vec<String> = rows.iter().map(|r| r.hash.clone()).collect();
+    let shorts: Vec<String> = hashes.iter().map(|h| short_hash(h, &hashes)).collect();
+    let hash_w = shorts.iter().map(|s| s.len()).max().unwrap_or(4).max(4);
 
-    println!("{}", theme::paint(&format!("  {:<name_w$}  {:>5}  {:>6}  {:>6}  PATH", "NAME", "CARDS", "ACTIVE", "NEWEST"), &[DIM]));
-    for r in &rows {
+    println!(
+        "{}",
+        theme::paint(
+            &format!("  {:<hash_w$}  {:<name_w$}  {:>5}  {:>6}  {:>6}  PATH", "HASH", "NAME", "CARDS", "ACTIVE", "NEWEST"),
+            &[DIM]
+        )
+    );
+    for (r, short) in rows.iter().zip(&shorts) {
         let mark = if r.default { theme::paint("*", &[GREEN]) } else { " ".into() };
+        let hash = theme::paint(&format!("{short:<hash_w$}"), &[DIM]);
         let name = if r.default { theme::paint(&format!("{:<name_w$}", r.name), &[BOLD]) } else { format!("{:<name_w$}", r.name) };
         match &r.counts {
             Some(c) => println!(
-                "{mark} {name}  {:>5}  {:>6}  {:>6}  {}",
+                "{mark} {hash}  {name}  {:>5}  {:>6}  {:>6}  {}",
                 c.cards,
                 c.active,
                 books::age_label(c.newest),
                 theme::paint(&r.path.display().to_string(), &[DIM])
             ),
             None => println!(
-                "{mark} {name}  {:>5}  {:>6}  {:>6}  {} {}",
+                "{mark} {hash}  {name}  {:>5}  {:>6}  {:>6}  {} {}",
                 "-",
                 "-",
                 "-",
@@ -69,8 +79,20 @@ pub fn print_list(registry: &Registry) {
         }
     }
     if registry.default.is_none() && registry.books.len() > 1 {
-        println!("no default: name a book with -b, or `dk book use <name>`");
+        println!("no current book: `dk book <name>` picks one");
     }
+}
+
+/// The shortest prefix of `hash`, at least four characters, that no other
+/// book's hash shares — what the card list does for card ids.
+fn short_hash(hash: &str, all: &[String]) -> String {
+    for length in 4..=hash.len() {
+        let prefix = &hash[..length];
+        if !all.iter().any(|other| other != hash && other.starts_with(prefix)) {
+            return prefix.to_string();
+        }
+    }
+    hash.to_string()
 }
 
 fn new(name: &str, path: Option<&str>) -> Result<()> {
@@ -178,19 +200,31 @@ fn rm(name: &str) -> Result<()> {
     if registry.is_empty() {
         println!("no books left: dk is back to one store");
     } else if registry.default.is_none() {
-        println!("no default now — `dk book use <name>` picks one");
+        println!("no current book now — `dk book <name>` picks one");
     }
     Ok(())
 }
 
-fn use_book(name: &str) -> Result<()> {
+/// `dk book <name|hash>`: make a book current, so bare `dk` lists it and
+/// every command without `-b` works in it.
+fn use_book(query: &str) -> Result<()> {
     let Some(mut registry) = Registry::load()? else {
-        return Err(Error::NoBook { name: name.to_string(), known: Vec::new() });
+        return Err(Error::NoBook { name: query.to_string(), known: Vec::new() });
     };
-    registry.path_of(name)?;
-    registry.default = Some(name.to_string());
+    let name = registry.resolve(query)?;
+    let path = registry.path_of(&name)?.clone();
+    registry.default = Some(name.clone());
     registry.save()?;
-    println!("default book: `{name}`");
+    println!(
+        "{} {}  {}",
+        theme::paint("book:", &[DIM]),
+        theme::paint(&name, &[BOLD]),
+        theme::paint(&path.display().to_string(), &[DIM])
+    );
+    if let Some(env) = std::env::var("DOCKET_BOOK").ok().filter(|b| !b.is_empty() && *b != name) {
+        eprintln!("note: DOCKET_BOOK={env} is set in this shell and still wins over the current book");
+    }
+    warn_about_home();
     Ok(())
 }
 

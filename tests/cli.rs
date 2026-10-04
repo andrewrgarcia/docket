@@ -265,7 +265,7 @@ fn adding_the_same_directory_twice_is_refused() {
 }
 
 #[test]
-fn the_list_shows_how_much_of_each_card_is_written() {
+fn the_list_has_no_done_column() {
     let s = Sandbox::new();
     s.card(
         "moxi",
@@ -273,10 +273,9 @@ fn the_list_shows_how_much_of_each_card_is_written() {
     );
     s.card("kol", "# kol\nstatus: idea\nwhat: y\n");
     let listing = s.stdout(&[]);
-    assert!(listing.contains("DONE"), "{listing}");
-    assert!(listing.contains("1/3"), "one of three sections written: {listing}");
-    assert!(listing.contains("—"), "a card with no sections shows a dash: {listing}");
-    assert!(!listing.contains("PROGRESS"), "the old column is gone");
+    assert!(listing.contains("HASH") && listing.contains("WHAT"), "{listing}");
+    assert!(!listing.contains("DONE") && !listing.contains("1/3"), "{listing}");
+    assert!(!listing.contains("sections written"), "{listing}");
 }
 
 #[test]
@@ -328,8 +327,8 @@ fn every_card_gets_a_hash_and_answers_to_it() {
     assert_eq!(id.len(), 8, "{body}");
 
     // Addressable by the whole id and by its first four characters.
-    assert!(s.stdout(&[&id]).contains("# moxi"));
-    assert!(s.stdout(&[&id[..4]]).contains("# moxi"));
+    assert!(s.stdout(&["show", &id]).contains("# moxi"));
+    assert!(s.stdout(&["show", &id[..4]]).contains("# moxi"));
 
     // And stable: a second run does not renumber it.
     s.stdout(&[]);
@@ -395,10 +394,10 @@ fn code_with_no_card_opens_the_store_folder() {
 fn prefixes_resolve_and_ambiguity_is_refused() {
     let s = Sandbox::new();
     s.card("moxi", "# moxi\nstatus: active\n");
-    assert!(s.stdout(&["mo"]).contains("# moxi"));
+    assert!(s.stdout(&["show", "mo"]).contains("# moxi"));
 
     s.card("morse", "# morse\nstatus: idea\n");
-    let out = s.run(&["mo"]);
+    let out = s.run(&["show", "mo"]);
     assert_eq!(out.status.code(), Some(3));
     assert!(err(&out).contains("matches"));
 }
@@ -482,7 +481,16 @@ fn unknown_flags_are_usage_errors() {
 #[test]
 fn a_missing_card_exits_three() {
     let s = Sandbox::new();
-    assert_eq!(s.run(&["ghost"]).status.code(), Some(3));
+    assert_eq!(s.run(&["show", "ghost"]).status.code(), Some(3));
+}
+
+#[test]
+fn a_bare_card_name_is_refused_and_points_at_show() {
+    let s = Sandbox::new();
+    s.card("moxi", "# moxi\nstatus: active\n");
+    let out = s.run(&["moxi"]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(err(&out).contains("dk show moxi"), "{}", err(&out));
 }
 
 #[test]
@@ -619,6 +627,11 @@ fn resume_orders_card_then_sessions_then_code() {
 
     // No manifest in the project, and the output says so.
     assert!(text.contains("[no WHITE.md at "), "{text}");
+
+    // The repo's commit state comes from git, read fresh, before the index —
+    // never from prose on the card. This sandbox folder is no repository.
+    let git = text.find("[not a git repository]").or_else(|| text.find("git: "));
+    assert!(git.is_some_and(|g| g > at("## code") && g < at("[no WHITE.md at ")), "{text}");
 }
 
 #[test]
@@ -927,11 +940,13 @@ fn the_first_book_keeps_your_existing_store_as_the_default() {
     assert!(made.status.success(), "{}", err(&made));
     assert!(text(&made).contains("your existing store"), "{}", text(&made));
 
-    // From here the registry decides. Two books, so bare `dk` is the index
-    // (as text, through a pipe), with the old store marked as the default...
-    let index = s.books_ok(&[]);
-    assert!(index.lines().any(|l| l.starts_with("* store")), "{index}");
+    // From here the registry decides. The old store is the current book, so
+    // bare `dk` is still its cards...
+    let index = s.books_ok(&["book"]);
+    assert!(index.lines().any(|l| l.starts_with('*') && l.contains("store")), "{index}");
     assert!(index.contains("bcrp"), "{index}");
+    let bare = s.books_ok(&[]);
+    assert!(bare.contains("book: store") && bare.contains("moxi"), "{bare}");
     // ...every other command uses that default...
     assert!(s.books_ok(&["show", "moxi"]).contains("a language"));
     let list = s.books_ok(&["-b", "store"]);
@@ -1025,15 +1040,16 @@ fn several_books_and_no_default_ask_which_one() {
     for (path, name) in [(&a, "a"), (&b, "b"), (&c, "c")] {
         s.books_ok(&["book", "add", path.to_str().unwrap(), name]);
     }
-    // `a` became the default; removing it leaves two books and no default.
+    // `a` became the default; removing it leaves two books and none current.
     s.books_ok(&["book", "rm", "a"]);
     let out = s.run_books(&["where"], &[]);
     assert_eq!(out.status.code(), Some(2), "{}", err(&out));
-    assert!(err(&out).contains("no default"), "{}", err(&out));
-    // Bare `dk` is the index, which is how you choose; it does not fail.
-    assert!(s.books_ok(&[]).contains("no default"));
+    assert!(err(&out).contains("dk book <name>"), "{}", err(&out));
+    // Bare `dk` lists the books and says how to pick one; it does not fail.
+    let books = s.books_ok(&[]);
+    assert!(books.contains("no current book") && books.contains("NAME"), "{books}");
 
-    s.books_ok(&["book", "use", "b"]);
+    s.books_ok(&["book", "b"]);
     let b = fs::canonicalize(&b).unwrap();
     assert_eq!(s.books_ok(&["where"]).trim_end(), b.to_str().unwrap());
 }
@@ -1141,7 +1157,7 @@ fn a_registry_that_cannot_be_read_is_reported_with_its_line() {
 }
 
 #[test]
-fn bare_dk_with_several_books_is_the_index_and_with_one_is_the_cards() {
+fn bare_dk_is_the_current_books_cards_and_dk_book_switches_it() {
     let s = Sandbox::new();
     let a = s.folder("a");
     fs::write(a.join("moxi.md"), CARD).unwrap();
@@ -1149,11 +1165,45 @@ fn bare_dk_with_several_books_is_the_index_and_with_one_is_the_cards() {
     let one = s.books_ok(&[]);
     assert!(one.contains("moxi") && one.contains("book: a"), "{one}");
 
+    // A second book does not turn bare `dk` into an index: it stays on `a`.
     let b = s.folder("b");
+    fs::write(b.join("fur.md"), "# fur\nstatus: active\nwhat: chats\n").unwrap();
     s.books_ok(&["book", "add", b.to_str().unwrap(), "b"]);
-    let index = s.books_ok(&[]);
-    assert!(index.contains("NAME") && index.lines().any(|l| l.starts_with("* a")), "{index}");
-    assert!(!index.contains("moxi"), "the index lists books, not cards: {index}");
+    let still = s.books_ok(&[]);
+    assert!(still.contains("book: a") && still.contains("moxi") && !still.contains("fur"), "{still}");
+
+    // `dk book b` makes b current, and `dk` follows.
+    let switched = s.books_ok(&["book", "b"]);
+    assert!(switched.contains("book: b"), "{switched}");
+    let now = s.books_ok(&[]);
+    assert!(now.contains("book: b") && now.contains("fur") && !now.contains("moxi"), "{now}");
+}
+
+#[test]
+fn dk_book_lists_hashes_and_a_hash_prefix_picks_the_book() {
+    let s = Sandbox::new();
+    let a = s.folder("a");
+    let docket = s.folder("docket");
+    s.books_ok(&["book", "add", a.to_str().unwrap(), "a"]);
+    s.books_ok(&["book", "add", docket.to_str().unwrap(), "docket"]);
+
+    let list = s.books_ok(&["book"]);
+    assert!(list.contains("HASH") && list.contains("NAME"), "{list}");
+    let row = list.lines().find(|l| l.contains("docket")).expect("docket row");
+    let hash = row.trim_start_matches(['*', ' ']).split_whitespace().next().unwrap().to_string();
+    assert_eq!(hash.len(), 4, "{row}");
+    assert!(hash.chars().all(|c| c.is_ascii_hexdigit()), "{row}");
+
+    s.books_ok(&["book", &hash]);
+    let after = s.books_ok(&["book"]);
+    assert!(after.lines().any(|l| l.starts_with('*') && l.contains("docket")), "{after}");
+    // A name prefix works too, and listing never changes the current book.
+    s.books_ok(&["book", "a"]);
+    assert!(s.books_ok(&["book"]).lines().any(|l| l.starts_with('*') && l.contains(" a ")));
+    assert!(s.books_ok(&[]).contains("book: a"));
+
+    let out = s.run_books(&["book", "zzz"], &[]);
+    assert!(!out.status.success());
 }
 
 #[test]

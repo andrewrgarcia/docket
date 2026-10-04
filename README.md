@@ -6,14 +6,14 @@ One folder of markdown files. No database, no daemon, no config. The command
 is `dk`.
 
 ```
-  HASH  NAME                STATUS    AGE  DONE      WHAT
-  a43b  moxi                active     3d  ▰▰▰▱ 3/4  semantic spatial description language
-  7f20  yggdrasil-cli       active     9d  ▰▰▰▰ 4/4  project flattener and diff engine
-  eab2  flashcall           stable    13d  ▰▰▰▰ 4/4  high-visibility calling interface for seniors
-  d8fe  the-fractal-prince  active   145d  ▱▱▱▱ 0/4  side-scrolling recursive platformer
-  0e94  membrane            dead     201d  ▱▱▱▱ 0/4  replaced by docket
+  HASH  NAME                STATUS    AGE  WHAT
+  a43b  moxi                active     3d  semantic spatial description language
+  7f20  yggdrasil-cli       active     9d  project flattener and diff engine
+  eab2  flashcall           stable    13d  high-visibility calling interface for seniors
+  d8fe  the-fractal-prince  active   145d  side-scrolling recursive platformer
+  0e94  membrane            dead     201d  replaced by docket
 
-5 cards · 1 untouched 90d+ · 11/20 sections written · ~34k tokens
+5 cards · 1 untouched 90d+ · ~34k tokens
 ```
 
 `145d` is the point. You forgot about that one.
@@ -23,22 +23,17 @@ the last commit or staged change; for anything else, the last time the card
 was edited. docket's own rewrites never count, so a migration cannot make a
 forgotten project look fresh.
 
-**DONE** is how much of the card you have actually written: sections with
-something in them over sections in total. A project you registered and never
-came back to shows `▱▱▱▱ 0/4` and says so at a glance.
-
 **STATUS** is a word, not a menu. `active`, `idea`, `paused`, `done` and
 `dead` get a colour and a place in the sort order — done and dead sink to the
 bottom and print dim — and anything else you write, `stable` or `shipped` or
 `blocked`, is kept and shown as you wrote it.
 
 The line under the table counts what the table cannot: how many projects have
-gone untouched for a quarter, how much of your cards is actually filled in,
-and what sending the lot would cost in tokens.
+gone untouched for a quarter, and what sending the lot would cost in tokens.
 
 Every card has an eight-character hash, fixed for its lifetime, and answers to
-any unambiguous prefix of it: `dk a43b`, `dk show d8f`. The column shows the
-shortest prefix that is currently unique. Names work too — `dk moxi` — and an
+any unambiguous prefix of it: `dk show a43b`, `dk show d8f`. The column shows the
+shortest prefix that is currently unique. Names work too — `dk show moxi` — and an
 exact name always wins over a hash prefix, so a card called `face` or `abed` is
 never shadowed by hex.
 
@@ -145,8 +140,8 @@ behaves as before.
 
 | | |
 |---|---|
-| `dk` | the list (with several books: the book index) |
-| `dk show <name>` | read a card (by name, hash, or a prefix of either) |
+| `dk` | the cards in the current book |
+| `dk show <name>` | read a card (by name, hash, or a prefix of either); in a terminal, with folding headings |
 | `dk edit <name>` | edit a card in the terminal |
 | `dk code [name]` | open a card in VS Code; no name opens the whole store |
 | `dk add [path]` | new card; no path means an idea |
@@ -157,7 +152,8 @@ behaves as before.
 | `dk rename <old> <new>` | rename a card, heading and all |
 | `dk rm <name>` | delete, after you type the name back |
 | `dk where` | print the store path |
-| `dk book` | list your books; `new`, `add`, `rm`, `use` manage them |
+| `dk book` | list your books, with their hashes |
+| `dk book <name\|hash>` | make a book current; `new`, `add`, `rm` manage them |
 | `dk set <name> <key> <value>` | set a header field, or `state` in `## now` |
 | `dk todo <name> <text>` | add an open `[ ]` box to `## next`, in the style of the ones there |
 | `dk tick <name> <text>` | tick the one open box containing the text |
@@ -168,11 +164,34 @@ behaves as before.
 
 `--out <file>` sends `pick`, `out` or `resume` somewhere other than their
 default file (`resume --out -` prints it), `--place <label>` limits `resume` to one of the card's folders, and `-b <book>` runs one command in a book other than the
-default (see Books). `dk save` has its own (see Sessions, from a shell). An unrecognised word is
-treated as a card name, so `dk moxi` works.
+current book (see Books). `dk save` has its own (see Sessions, from a shell). An unrecognised
+word is an error, not a card name: a card is read with `dk show moxi`.
 
 Exit codes: `2` misuse, `3` no such card, `4` name already taken, `1`
 everything else.
+
+## Reading a card
+
+`dk show <name>` in a terminal opens the card full screen, in the same colours
+it prints in, with every heading a fold — the card's `# name`, each of its
+`## sections`, `## readme`, and the README's own headings below that. It
+starts with the card open and the README shut.
+
+| key | |
+|---|---|
+| `↑` `↓` / `j` `k`, `space` `b`, `g` `G` | move a line, a page, to either end |
+| `tab` / `shift-tab` (`n` `N`) | next / previous heading |
+| `enter` | fold or unfold the heading; on a line, fold the section it is in |
+| `→` `←` (`l` `h`) | unfold; fold, or climb to the heading above |
+| `z` | outline: every section folded, one line each |
+| `o` | everything open |
+| `e` | edit the card, then come back to it |
+| `q` | quit |
+
+Unfolding a heading that holds a single heading opens that too, so `## readme`
+goes straight to the README's sections. The mouse is left to the terminal, so
+text can still be selected and copied. Piped or redirected, `dk show` prints
+the card as plain text, as before.
 
 ## Picking
 
@@ -354,10 +373,10 @@ is for keeping collections apart: personal and work, a team's cards in their
 own git repo, or a demo with nothing private in it.
 
 ```bash
-dk book                          # list them: cards, active, newest, path
+dk book                          # list them: hash, cards, active, newest, path
+dk book bcrp                     # make it current (a name, a hash, or a prefix of either)
 dk book new bcrp                 # a new, empty book (or: dk book new bcrp ~/work/bcrp)
 dk book add ~/notes/docket       # register a folder of cards you already have
-dk book use bcrp                 # make it the default
 dk book rm bcrp                  # forget it; the folder is left alone
 ```
 
@@ -365,9 +384,11 @@ The first time you make a book, the store you already have is registered too,
 named after its folder, and stays the default, so starting a second collection
 never makes the first one disappear.
 
-With two or more books, a bare `dk` opens the book index: the default is under
-the cursor, Enter shows that book's cards, `p` picks from it, `q` quits. Every
-other command uses the default book unless you say otherwise:
+A bare `dk` lists the current book's cards, `book: <name>` above them. `dk book
+<name>` switches it, and it stays switched until you switch again (`dk book use
+<name>` still works). A book's hash is made from its name, so it is the same
+on every machine. Every other command uses the current book unless you say
+otherwise:
 
 ```bash
 dk -b bcrp                       # one command in another book
@@ -376,9 +397,10 @@ dk resume bcrp/rates
 DOCKET_BOOK=bcrp dk              # for a whole shell
 ```
 
-Nothing remembers which book you looked at last, on purpose: a sticky choice is
-how a card ends up in the wrong collection. The default is the one you set
-with `dk book use`, and every list names its book.
+The current book is the only thing docket remembers, it lives in the books file
+rather than in hidden state, and every list names its book, so a card does not
+land in the wrong collection unseen. With several books and none current, a
+bare `dk` lists the books and asks you to pick one.
 
 Which book a command uses, first match wins: `-b` or `book/card`,
 `DOCKET_BOOK`, `DOCKET_HOME`, the default book (or the only one), and with no

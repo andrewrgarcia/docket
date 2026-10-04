@@ -9,10 +9,14 @@ use crate::ui;
 /// see is the whole card as an AI would receive it, which is the point of
 /// looking at it.
 ///
-/// Colour when a terminal is watching, plain when piped — `dk show moxi >
-/// card.md` has to produce the card, not a screenshot of it.
+/// In a terminal it opens the fold view: the same text in the same colours,
+/// with every heading collapsible. Piped, it is the card verbatim — `dk show
+/// moxi > card.md` has to produce the card, not a screenshot of it.
 pub fn run(store: &Store, query: &str) -> Result<()> {
     let card = store.get(query)?;
+    if crate::view::wanted() {
+        return crate::view::run(store, &card.name);
+    }
     print!("{}", ui::render_card(&card));
     Ok(())
 }

@@ -44,6 +44,12 @@ pub fn generate(seed: &str, taken: &BTreeSet<String>) -> String {
     format(fnv1a(format!("{seed}:{nanos}:fallback").as_bytes()))
 }
 
+/// A fixed id for a piece of text: the same text always gives the same id.
+/// For things identified by name rather than created with an id, like books.
+pub fn of_text(text: &str) -> String {
+    format(fnv1a(text.as_bytes()))
+}
+
 fn format(hash: u64) -> String {
     format!("{hash:016x}")[..LENGTH].to_string()
 }

@@ -243,7 +243,7 @@ fn push(outline: &mut Outline, heading: &str, level: usize, parent: Option<usize
 }
 
 /// The length of a fence marker, for a line that is one.
-fn fence_marker(line: &str) -> Option<usize> {
+pub(crate) fn fence_marker(line: &str) -> Option<usize> {
     let trimmed = line.trim_start();
     for mark in ['`', '~'] {
         let run = trimmed.chars().take_while(|c| *c == mark).count();
@@ -256,7 +256,7 @@ fn fence_marker(line: &str) -> Option<usize> {
 
 /// `(level, text)` for a heading line, `None` for anything else. A `#` with no
 /// space after it is not a heading — `#1 priority` is prose.
-fn heading(line: &str) -> Option<(usize, &str)> {
+pub(crate) fn heading(line: &str) -> Option<(usize, &str)> {
     let level = line.chars().take_while(|c| *c == '#').count();
     if level == 0 || level > 6 {
         return None;

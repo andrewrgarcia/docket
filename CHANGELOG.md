@@ -3,9 +3,36 @@
 All notable changes to docket. Format follows [Keep a Changelog]; versions
 follow [Semantic Versioning].
 
-## [Unreleased]
+## [0.2.0]
+
+### Changed
+- Bare `dk` lists the current book's cards. The interactive book index is
+  gone. `dk book <name|hash>` makes a book current (it sets the default; `dk
+  book use` still works), and the choice sticks until the next switch. With
+  several books and none current, `dk` prints the book list and how to pick.
+- `dk book` lists a HASH column: eight hex characters made from the book's
+  name, so they are stable across machines. Books, like cards, resolve by
+  name, hash, or a unique prefix of either, including in `-b`.
+- `dk show` in a terminal opens a fold view. Every heading folds, from the
+  card's `# name` down through the README's own headings. The colours are
+  the same, the README starts folded, and `z` gives the outline, `o` opens
+  everything and `e` edits and returns. Piped, it prints the plain card as
+  before.
+
+### Removed
+- The DONE column (`▰▰▱▱ 2/4`) and the "n/m sections written" count under
+  the list.
+- `dk <card>` as a shortcut for `dk show <card>`. An unrecognised word is now
+  a usage error that names `dk show`.
 
 ### Added
+- `dk resume`: each place's `## code` block opens with a `git:` line read
+  fresh from git — branch, last commit date and subject, uncommitted change
+  count (or `clean`), ahead/behind its remote. Printed even without a
+  `WHITE.md`; failures are bracketed (`[not a git repository]`, `[git not
+  found — commit state unknown]`). Commit state changes between sessions, so
+  the resume reads it instead of trusting a card or entry that says
+  "uncommitted" (Salvation spec D4/D5, 2026-10-04).
 - Writing without an editor, for scripts and AI sessions: `dk set <card> <key>
   <value>` (a header field, `place <label> <path>` by label, or `state` in
   `## now`), `dk todo` (an open box at the end of `## next`, bulleted or not to match the boxes already there), `dk tick` (the one

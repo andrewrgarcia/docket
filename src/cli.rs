@@ -3,8 +3,8 @@ use crate::error::{Error, Result};
 pub const HELP: &str = "\
 dk — every project and idea you have, in one list.
 
-  dk                    the list
-  dk show <name>        read a card
+  dk                    the cards in the current book
+  dk show <name>        read a card (in a terminal: fold and unfold headings)
   dk edit <name>        edit a card here in the terminal
   dk code [name]        open a card in VS Code (no name: the whole store)
   dk add [path]         new card; no path means an idea
@@ -36,17 +36,18 @@ version, and `dk undo <name>` swaps it back):
   A text of `-` is read from stdin.
 
   dk book               list your books (separate collections of cards)
+  dk book <name|hash>   make a book current: bare `dk` lists it from now on
   dk book new <name> [path]    make a book and register it
   dk book add <path> [name]    register a folder of cards as a book
   dk book rm <name>     forget a book (its folder is left alone)
-  dk book use <name>    make a book the default
 
   --out <file>           with pick, out or resume: write somewhere else
                          (resume --out - prints to stdout)
   --place <label>        with resume: only that place's code (see `place:` below)
   -b, --book <name>      use this book for one command (or write `name/card`)
 
-Cards are addressed by name or by the first few characters of their hash.
+Cards and books are addressed by name or by the first few characters of
+their hash.
 A project in several folders: add `place: <label> <path>` lines to the card's
 header, under `path:`.
 Cards are plain markdown. Set DOCKET_HOME to move the store.
@@ -93,6 +94,7 @@ pub enum BookCmd {
     New { name: String, path: Option<String> },
     Add { path: String, name: Option<String> },
     Rm(String),
+    /// `dk book <name|hash>` (or `dk book use <name>`): make it current.
     Use(String),
 }
 
@@ -107,8 +109,9 @@ where
     Ok((parse(rest)?, book))
 }
 
-/// No parser crate: eight verbs, one positional each. The payoff is that an
-/// unrecognised word is a card name, so `dk moxi` shows that card.
+/// No parser crate: a handful of verbs, one or two positionals each. An
+/// unrecognised word is an error, never a card name: `dk moxi` used to show
+/// the card, which turned every typo of a verb into a card lookup.
 pub fn parse<I>(args: I) -> Result<Command>
 where
     I: IntoIterator<Item = String>,
@@ -210,7 +213,9 @@ where
         other if other.starts_with('-') => {
             Err(Error::usage(format!("unknown flag `{other}` — try `dk help`")))
         }
-        name => Ok(Command::Show(name.to_string())),
+        word => Err(Error::usage(format!(
+            "unknown command `{word}` — to read a card: `dk show {word}`; `dk help` lists the rest"
+        ))),
     }
 }
 
@@ -226,6 +231,10 @@ fn parse_book(operands: &[String]) -> Result<Command> {
             ("add", [path, name]) => BookCmd::Add { path: path.clone(), name: Some(name.clone()) },
             ("rm" | "remove", [name]) => BookCmd::Rm(name.clone()),
             ("use", [name]) => BookCmd::Use(name.clone()),
+            // A lone word that is not a verb names a book to make current.
+            (name, []) if !matches!(name, "new" | "add" | "rm" | "remove" | "use") => {
+                BookCmd::Use(name.to_string())
+            }
             ("new", _) => return Err(Error::usage("try `dk book new <name> [path]`")),
             ("add", _) => return Err(Error::usage("try `dk book add <path> [name]`")),
             ("rm" | "remove", _) => return Err(Error::usage("try `dk book rm <name>`")),
@@ -337,9 +346,10 @@ mod tests {
     }
 
     #[test]
-    fn an_unknown_word_is_a_card_name() {
-        assert_eq!(parse_words("moxi").unwrap(), Command::Show("moxi".into()));
+    fn a_card_is_read_with_show_never_by_its_bare_name() {
         assert_eq!(parse_words("show moxi").unwrap(), Command::Show("moxi".into()));
+        let Err(Error::Usage(msg)) = parse_words("moxi") else { panic!("bare name should fail") };
+        assert!(msg.contains("dk show moxi"), "{msg}");
     }
 
     #[test]
@@ -431,9 +441,12 @@ mod tests {
         );
         assert_eq!(book("book rm bcrp"), BookCmd::Rm("bcrp".into()));
         assert_eq!(book("book use bcrp"), BookCmd::Use("bcrp".into()));
+        assert_eq!(book("book bcrp"), BookCmd::Use("bcrp".into()));
+        assert_eq!(book("book 3f2a"), BookCmd::Use("3f2a".into()));
+        assert!(matches!(parse_words("book use"), Err(Error::Usage(_))));
         assert!(matches!(parse_words("book new"), Err(Error::Usage(_))));
         assert!(matches!(parse_words("book rm"), Err(Error::Usage(_))));
-        assert!(matches!(parse_words("book frobnicate"), Err(Error::Usage(_))));
+        assert!(matches!(parse_words("book a b"), Err(Error::Usage(_))));
     }
 
     #[test]

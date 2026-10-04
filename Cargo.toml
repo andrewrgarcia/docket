@@ -1,6 +1,6 @@
 [package]
 name = "docket-cli"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 
 description = "Every project and idea you have, in one list, ready to paste into any AI. Plain markdown, no database, no daemon."

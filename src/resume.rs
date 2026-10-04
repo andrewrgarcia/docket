@@ -7,8 +7,10 @@
 //! 2. **the sessions** — the newest three entries whole, older ones as one
 //!    index line each, and every long-form document as one index line. These
 //!    hold the *why*, which no other source does;
-//! 3. **the code** — the index `ygg` makes of the project's `WHITE.md`: which
-//!    files, how big. The files themselves are opened when a task needs them.
+//! 3. **the code** — one `git:` line per place (branch, last commit, anything
+//!    uncommitted or unpushed), then the index `ygg` makes of the project's
+//!    `WHITE.md`: which files, how big. The files themselves are opened when a
+//!    task needs them.
 //!
 //! It only reads. Session entries are written by whoever ends a session —
 //! `dk save` (see `ledger.rs`), or a Cowork run or you by hand — into a fur
@@ -534,10 +536,101 @@ fn code_of(path: &str, white: Option<String>) -> String {
         }
         None => project.join("WHITE.md"),
     };
-    if !manifest.is_file() {
-        return format!("[no WHITE.md at {}]", manifest.display());
+    let index = if manifest.is_file() {
+        run_ygg(project, &manifest)
+    } else {
+        format!("[no WHITE.md at {}]", manifest.display())
+    };
+    format!("{}\n\n{index}", git_line(project))
+}
+
+// ---------------------------------------------------------------------------
+// the repo's own record
+// ---------------------------------------------------------------------------
+
+/// Longest commit subject quoted before it is cut with an ellipsis.
+const SUBJECT_MAX: usize = 72;
+
+/// One line saying what git knows about the place right now: branch, the last
+/// commit, and whether anything is uncommitted or unpushed.
+///
+/// This is why the resume carries it: whether work is committed changes
+/// between sessions, when no one writes an entry, so a card or entry that says
+/// "uncommitted" goes stale the moment you commit. git is the record of that;
+/// the resume reads it fresh every time instead of trusting prose about it.
+fn git_line(project: &Path) -> String {
+    let git = |args: &[&str]| {
+        Command::new("git")
+            .current_dir(project)
+            .args(args)
+            .stdin(Stdio::null())
+            .output()
+    };
+    let status = match git(&["status", "--porcelain=v1", "--branch"]) {
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {
+            return "[git not found — commit state unknown]".to_string()
+        }
+        Err(e) => return format!("[git could not start: {e}]"),
+        Ok(out) if !out.status.success() => {
+            let said = first_line(&out.stderr).unwrap_or_default();
+            if said.contains("not a git repository") {
+                return "[not a git repository]".to_string();
+            }
+            return format!("[git failed: {said}]");
+        }
+        Ok(out) => String::from_utf8_lossy(&out.stdout).into_owned(),
+    };
+    let last = git(&["log", "-1", "--date=format:%Y-%m-%d %H:%M", "--format=%cd%x1f%s"])
+        .ok()
+        .filter(|out| out.status.success())
+        .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_string())
+        .filter(|l| !l.is_empty());
+    describe_git(&status, last.as_deref())
+}
+
+/// `status` is `git status --porcelain=v1 --branch`; `last` is the newest
+/// commit as `<date>\x1f<subject>`, or `None` before the first commit.
+fn describe_git(status: &str, last: Option<&str>) -> String {
+    let mut lines = status.lines();
+    let head = lines.next().and_then(|l| l.strip_prefix("## ")).unwrap_or("");
+    let changes = lines.filter(|l| !l.trim().is_empty()).count();
+
+    let (branch, tracking) = match head.strip_prefix("No commits yet on ") {
+        Some(b) => (b.trim().to_string(), String::new()),
+        None => {
+            let (name, rest) = head.split_once("...").unwrap_or((head, ""));
+            let name = name.split(' ').next().unwrap_or(name);
+            let tracking = rest
+                .split_once('[')
+                .and_then(|(_, t)| t.strip_suffix(']'))
+                .unwrap_or("")
+                .to_string();
+            (name.to_string(), tracking)
+        }
+    };
+
+    let mut parts = vec![format!("git: {}", if branch.is_empty() { "?" } else { &branch })];
+    parts.push(match last.and_then(|l| l.split_once('\x1f')) {
+        Some((date, subject)) => format!("last commit {date} \"{}\"", cut(subject)),
+        None => "no commits yet".to_string(),
+    });
+    parts.push(match changes {
+        0 => "clean".to_string(),
+        1 => "1 uncommitted change".to_string(),
+        n => format!("{n} uncommitted changes"),
+    });
+    if !tracking.is_empty() {
+        parts.push(tracking);
     }
-    run_ygg(project, &manifest)
+    parts.join(" · ")
+}
+
+fn cut(subject: &str) -> String {
+    if subject.chars().count() <= SUBJECT_MAX {
+        return subject.to_string();
+    }
+    let kept: String = subject.chars().take(SUBJECT_MAX - 1).collect();
+    format!("{}…", kept.trim_end())
 }
 
 /// `ygg --white <manifest> --out <temp>.md`, run from the project so
@@ -586,6 +679,72 @@ fn first_line(bytes: &[u8]) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_clean_repo_reads_as_one_line() {
+        let line = describe_git("## main...origin/main\n", Some("2026-10-04 01:03\x1fnotes: log step 1"));
+        assert_eq!(line, "git: main · last commit 2026-10-04 01:03 \"notes: log step 1\" · clean");
+    }
+
+    #[test]
+    fn uncommitted_and_unpushed_work_is_counted() {
+        let status = "## main...origin/main [ahead 2]\n M src/a.rs\n?? notes.md\n";
+        let line = describe_git(status, Some("2026-10-04 01:03\x1fwip"));
+        assert_eq!(line, "git: main · last commit 2026-10-04 01:03 \"wip\" · 2 uncommitted changes · ahead 2");
+        let one = describe_git("## dev\n M a\n", Some("2026-10-04 01:03\x1fx"));
+        assert!(one.ends_with("· 1 uncommitted change"), "{one}");
+    }
+
+    #[test]
+    fn a_repo_without_commits_says_so() {
+        let line = describe_git("## No commits yet on main\n?? a\n", None);
+        assert_eq!(line, "git: main · no commits yet · 1 uncommitted change");
+    }
+
+    #[test]
+    fn long_subjects_are_cut() {
+        let long = "x".repeat(100);
+        let line = describe_git("## main\n", Some(&format!("2026-10-04 01:03\x1f{long}")));
+        assert!(line.contains('…') && line.len() < 140, "{line}");
+    }
+
+    #[test]
+    fn git_line_reads_a_real_repo_and_reports_a_plain_folder() {
+        let have_git = Command::new("git").arg("--version").output().is_ok();
+        if !have_git {
+            return;
+        }
+        let root = env::temp_dir().join(format!("dk-git-line-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let plain = root.join("plain");
+        let repo = root.join("repo");
+        fs::create_dir_all(&plain).unwrap();
+        fs::create_dir_all(&repo).unwrap();
+        // Outside any repository, unless the temp dir itself sits in one.
+        let outside = git_line(&plain);
+        assert!(outside == "[not a git repository]" || outside.starts_with("git: "), "{outside}");
+        let git = |args: &[&str]| {
+            Command::new("git")
+                .current_dir(&repo)
+                .args(args)
+                .env("GIT_AUTHOR_NAME", "t")
+                .env("GIT_AUTHOR_EMAIL", "t@t")
+                .env("GIT_COMMITTER_NAME", "t")
+                .env("GIT_COMMITTER_EMAIL", "t@t")
+                .output()
+                .unwrap()
+        };
+        git(&["init", "-q", "-b", "main"]);
+        fs::write(repo.join("a.txt"), "a").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "-q", "-m", "first commit"]);
+        let clean = git_line(&repo);
+        assert!(clean.starts_with("git: main · last commit "), "{clean}");
+        assert!(clean.ends_with("\"first commit\" · clean"), "{clean}");
+        fs::write(repo.join("b.txt"), "b").unwrap();
+        assert!(git_line(&repo).ends_with("· 1 uncommitted change"));
+        let _ = fs::remove_dir_all(&root);
+    }
 
     #[test]
     fn tags_are_read_from_a_block_sequence() {

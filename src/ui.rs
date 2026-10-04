@@ -3,7 +3,7 @@ use std::io::{self, Write};
 use crate::card::Card;
 use crate::editor::syntax::{self, Kind};
 use crate::error::{Error, Result};
-use crate::theme::{self, BOLD, CYAN, DIM, GREEN};
+use crate::theme::{self, BOLD, CYAN, DIM};
 
 /// Widths outside this range mean a terminal that did not report honestly.
 const MIN_WIDTH: usize = 40;
@@ -52,12 +52,6 @@ fn render_table(cards: &[Card], width: usize, color: bool) -> String {
 
     let hash_w = shorts.iter().map(|s| s.len()).max().unwrap_or(4).max(4);
 
-    // How much of each card has actually been written. A card is a form you
-    // fill in over time, and this is the column that shames the empty ones.
-    let filled: Vec<(usize, usize)> = cards.iter().map(Card::completion).collect();
-    let any_sections = filled.iter().any(|(_, total)| *total > 0);
-    let done_w = if any_sections { "DONE".len().max(BAR + 4) } else { 0 };
-
     let status_w = cards
         .iter()
         .map(|c| c.status.as_str().len())
@@ -68,7 +62,7 @@ fn render_table(cards: &[Card], width: usize, color: bool) -> String {
     // Everything but the name and the description is fixed width. The name
     // gets what it needs up to half the terminal, the description takes the
     // rest, and both are clipped — a table that wraps stops being a table.
-    let fixed = 2 + hash_w + 2 + 2 + status_w + 2 + 5 + 2 + if any_sections { done_w + 2 } else { 0 };
+    let fixed = 2 + hash_w + 2 + 2 + status_w + 2 + 5 + 2;
     let longest_name = cards.iter().map(|c| c.name.chars().count()).max().unwrap_or(4).max(4);
     let name_w = longest_name
         .min(width.saturating_sub(fixed + 4).max(4))
@@ -76,11 +70,10 @@ fn render_table(cards: &[Card], width: usize, color: bool) -> String {
     let what_w = width.saturating_sub(fixed + name_w);
 
     let mut out = String::new();
-    let done_head = if any_sections { format!("{:<done_w$}  ", "DONE") } else { String::new() };
     out.push_str(&ink(
         color,
         &format!(
-            "  {:<hash_w$}  {:<name_w$}  {:<status_w$}  {:>5}  {done_head}{}",
+            "  {:<hash_w$}  {:<name_w$}  {:<status_w$}  {:>5}  {}",
             "HASH",
             clip("NAME", name_w),
             "STATUS",
@@ -91,7 +84,7 @@ fn render_table(cards: &[Card], width: usize, color: bool) -> String {
     ));
     out.push('\n');
 
-    for ((card, short), (done, total)) in cards.iter().zip(&shorts).zip(&filled) {
+    for (card, short) in cards.iter().zip(&shorts) {
         let cold = card.status.is_cold();
 
         let hash = ink(color, &pad(short, hash_w), &[DIM]);
@@ -102,20 +95,15 @@ fn render_table(cards: &[Card], width: usize, color: bool) -> String {
             &[theme::status_color(card.status.as_str())],
         );
         let age = ink(color, &format!("{:>4}d", card.age_days), &[DIM]);
-        let done_cell = if any_sections {
-            format!("{}  ", completion_cell(*done, *total, done_w, color))
-        } else {
-            String::new()
-        };
         let what = clip(&card.what, what_w);
         let what = if cold { ink(color, &what, &[DIM]) } else { what };
 
-        out.push_str(&format!("  {hash}  {name}  {status}  {age}  {done_cell}{what}"));
+        out.push_str(&format!("  {hash}  {name}  {status}  {age}  {what}"));
         out.push('\n');
     }
 
     out.push('\n');
-    out.push_str(&ink(color, &summary(cards, &filled), &[DIM]));
+    out.push_str(&ink(color, &summary(cards), &[DIM]));
     out.push('\n');
     out
 }
@@ -124,21 +112,14 @@ fn render_table(cards: &[Card], width: usize, color: bool) -> String {
 /// that a slow month does not accuse you, and short enough that a year does.
 const STALE_DAYS: u64 = 90;
 
-/// The line under the table. "14 cards" on its own says nothing the table did
-/// not; these are the three numbers the table cannot show at a glance.
-fn summary(cards: &[Card], filled: &[(usize, usize)]) -> String {
+/// The line under the table: what the table cannot show at a glance.
+fn summary(cards: &[Card]) -> String {
     let stale = cards.iter().filter(|c| c.age_days >= STALE_DAYS && !c.status.is_cold()).count();
-    let (written, total) = filled
-        .iter()
-        .fold((0, 0), |(w, t), (f, s)| (w + f, t + s));
     let tokens: usize = cards.iter().map(|c| c.body.chars().count() / 4).sum();
 
     let mut parts = vec![format!("{} cards", cards.len())];
     if stale > 0 {
         parts.push(format!("{stale} untouched {STALE_DAYS}d+"));
-    }
-    if total > 0 {
-        parts.push(format!("{written}/{total} sections written"));
     }
     parts.push(format!("~{} tokens", human(tokens)));
     parts.join(" · ")
@@ -155,12 +136,9 @@ fn human(tokens: usize) -> String {
     }
 }
 
-/// A card for reading: the same text, coloured by line kind.
-pub fn render_card(card: &Card) -> String {
-    render_card_with(card, theme::enabled())
-}
-
-fn render_card_with(card: &Card, color: bool) -> String {
+/// A card as it is read: the body, then the linked README under `## readme`.
+/// What `dk show` prints when piped and what its fold view displays.
+pub fn card_text(card: &Card) -> String {
     let mut text = card.body.trim_end().to_string();
     text.push('\n');
 
@@ -179,7 +157,16 @@ fn render_card_with(card: &Card, color: bool) -> String {
         }
         (true, _) => {}
     }
+    text
+}
 
+/// A card for reading: the same text, coloured by line kind.
+pub fn render_card(card: &Card) -> String {
+    render_card_with(card, theme::enabled())
+}
+
+fn render_card_with(card: &Card, color: bool) -> String {
+    let text = card_text(card);
     if !color {
         return text;
     }
@@ -201,23 +188,6 @@ fn pad(text: &str, width: usize) -> String {
     let mut out = text.to_string();
     out.extend(std::iter::repeat(' ').take(width.saturating_sub(used)));
     out
-}
-
-/// Blocks in the completion bar.
-const BAR: usize = 4;
-
-/// `▰▰▱▱ 2/4` — full when every section has something in it, dim when the
-/// card has no sections at all.
-fn completion_cell(done: usize, total: usize, width: usize, color: bool) -> String {
-    if total == 0 {
-        return ink(color, &pad("—", width), &[DIM]);
-    }
-    let lit = (done * BAR).div_ceil(total.max(1)).min(BAR);
-    let bar: String = "▰".repeat(lit) + &"▱".repeat(BAR - lit);
-    let code = if done == total { GREEN } else { CYAN };
-    let text = format!("{bar} {done}/{total}");
-    let padding = width.saturating_sub(text.chars().count());
-    format!("{}{}", ink(color, &text, &[code]), " ".repeat(padding))
 }
 
 /// Cut to `width` characters, ending in an ellipsis when something was lost.
@@ -308,30 +278,16 @@ mod tests {
     }
 
     #[test]
-    fn the_done_column_reports_filled_sections() {
-        let bare = [card("a", "active", "x")];
-        assert!(!plain(&bare, 80).contains("DONE"), "no sections, no column");
-
-        let half = Card::parse(
-            "b",
-            "# b\nid: bbbb0000\nstatus: active\nwhat: y\n\n## now\nparser\n\n## next\n",
-            0,
-        );
-        let out = plain(&[card("a", "active", "x"), half], 80);
-        assert!(out.contains("DONE"), "{out}");
-        assert!(out.contains("1/2"), "{out}");
-        assert!(out.contains('▰') && out.contains('▱'), "{out}");
-    }
-
-    #[test]
-    fn a_full_card_fills_the_bar() {
+    fn there_is_no_done_column() {
         let full = Card::parse(
             "b",
-            "# b\nid: bbbb0000\nstatus: active\nwhat: y\n\n## now\na\n\n## next\nb\n",
+            "# b\nid: bbbb0000\nstatus: active\nwhat: y\n\n## now\na\n\n## next\n",
             0,
         );
         let out = plain(&[full], 80);
-        assert!(out.contains("▰▰▰▰ 2/2"), "{out}");
+        assert!(!out.contains("DONE"), "{out}");
+        assert!(!out.contains('▰') && !out.contains("1/2"), "{out}");
+        assert!(!out.contains("sections written"), "{out}");
     }
 
     #[test]
@@ -359,20 +315,17 @@ mod tests {
         old.age_days = 200;
 
         let cards = [fresh, old];
-        let filled: Vec<(usize, usize)> = cards.iter().map(Card::completion).collect();
-        let line = summary(&cards, &filled);
+        let line = summary(&cards);
 
         assert!(line.contains("2 cards"), "{line}");
         assert!(line.contains("1 untouched 90d+"), "{line}");
-        assert!(line.contains("1/2 sections written"), "{line}");
         assert!(line.contains("tokens"), "{line}");
     }
 
     #[test]
     fn a_fresh_store_does_not_mention_staleness() {
         let cards = [card("a", "active", "x")];
-        let filled: Vec<(usize, usize)> = cards.iter().map(Card::completion).collect();
-        let line = summary(&cards, &filled);
+        let line = summary(&cards);
         assert!(!line.contains("untouched"), "{line}");
     }
 
@@ -380,8 +333,7 @@ mod tests {
     fn a_finished_project_is_not_counted_as_forgotten() {
         let mut done = Card::parse("b", "# b\nid: bbbb0000\nstatus: done\n", 0);
         done.age_days = 400;
-        let filled = vec![done.completion()];
-        assert!(!summary(&[done], &filled).contains("untouched"));
+        assert!(!summary(&[done]).contains("untouched"));
     }
 
     #[test]

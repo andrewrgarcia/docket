@@ -21,10 +21,10 @@ mod outline;
 mod pack;
 mod pick;
 mod resume;
-mod shelf;
 mod store;
 mod theme;
 mod ui;
+mod view;
 
 use std::process::ExitCode;
 

@@ -47,6 +47,31 @@ impl Registry {
         })
     }
 
+    /// The book a word means: its exact name, else the one book whose name or
+    /// hash starts with it — the same rule cards follow.
+    pub fn resolve(&self, query: &str) -> Result<String> {
+        if self.books.contains_key(query) {
+            return Ok(query.to_string());
+        }
+        let by_id = crate::id::looks_like(query);
+        let hits: Vec<&String> = self
+            .books
+            .keys()
+            .filter(|name| name.starts_with(query) || (by_id && hash(name).starts_with(query)))
+            .collect();
+        match hits.as_slice() {
+            [only] => Ok((*only).clone()),
+            [] => Err(Error::NoBook {
+                name: query.to_string(),
+                known: self.books.keys().cloned().collect(),
+            }),
+            many => Err(Error::usage(format!(
+                "`{query}` matches several books ({}) — type more of it",
+                many.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ")
+            ))),
+        }
+    }
+
     /// Read the registry file. A missing file is `None`, which means "no
     /// books, behave as always"; a file that cannot be understood is an error
     /// that names the line, because quietly ignoring it would hide the
@@ -173,8 +198,10 @@ pub fn default_book_dir(name: &str) -> Result<PathBuf> {
 /// 4. the registry's default; failing that, its only book
 /// 5. no registry: the legacy store
 ///
-/// Nothing remembers a "current book" between commands. A sticky selection is
-/// how a card lands in the wrong collection.
+/// The registry's default is the "current book": `dk book <name>` sets it and
+/// bare `dk` lists it. It is the only remembered choice, it lives in the
+/// registry file rather than in hidden state, and `dk` prints `book: <name>`
+/// above every list so a card cannot land in the wrong collection unseen.
 pub fn choose(
     registry: Option<&Registry>,
     explicit: Option<&str>,
@@ -183,7 +210,11 @@ pub fn choose(
 ) -> Result<Choice> {
     let named = |reg: Option<&Registry>, name: &str| -> Result<Choice> {
         match reg {
-            Some(reg) => Ok(Choice::Book { name: name.to_string(), path: reg.path_of(name)?.clone() }),
+            Some(reg) => {
+                let name = reg.resolve(name)?;
+                let path = reg.path_of(&name)?.clone();
+                Ok(Choice::Book { name, path })
+            }
             None => Err(Error::NoBook { name: name.to_string(), known: Vec::new() }),
         }
     };
@@ -207,32 +238,18 @@ pub fn choose(
     match (names.next(), names.next()) {
         (Some(only), None) => named(Some(reg), only),
         _ => Err(Error::usage(format!(
-            "several books ({}) and no default — name one with `-b <name>`, or `dk book use <name>`",
+            "several books ({}) and none is current — `dk book <name>` picks one, `-b <name>` names one for a single command",
             reg.books.keys().cloned().collect::<Vec<_>>().join(", ")
         ))),
     }
 }
 
-/// Whether bare `dk` should show the book index rather than one book's
-/// cards: only when nothing has already chosen a store (no `-b`, no
-/// `DOCKET_BOOK`, no `DOCKET_HOME`) and there is more than one book to choose
-/// from. With one book, or with none, `dk` is the card list it always was.
-pub fn index_wanted(
-    registry: Option<&Registry>,
-    explicit: Option<&str>,
-    book_env: Option<&str>,
-    home_env: Option<&Path>,
-) -> bool {
-    explicit.is_none()
-        && book_env.filter(|b| !b.is_empty()).is_none()
-        && home_env.is_none()
-        && registry.is_some_and(|r| r.books.len() > 1)
-}
-
-/// One book as the index and `dk book` show it.
+/// One book as `dk book` shows it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Summary {
     pub name: String,
+    /// Eight hex characters derived from the name; see [`hash`].
+    pub hash: String,
     pub path: PathBuf,
     pub default: bool,
     /// `None` when the folder cannot be read — it has moved or gone.
@@ -256,6 +273,7 @@ pub fn summaries(registry: &Registry) -> Vec<Summary> {
         .iter()
         .map(|(name, path)| Summary {
             name: name.clone(),
+            hash: hash(name),
             path: path.clone(),
             default: registry.default.as_deref() == Some(name),
             counts: counts(path),
@@ -284,6 +302,14 @@ fn counts(path: &Path) -> Option<Counts> {
         newest = Some(newest.map_or(days, |n| n.min(days)));
     }
     Some(Counts { cards, active, newest })
+}
+
+/// A book's hash: eight hex characters from its name, so it is the same on
+/// every machine and survives the folder moving. Books are not created with
+/// an id the way cards are, and the name is the one thing that already
+/// identifies a book everywhere it is used.
+pub fn hash(name: &str) -> String {
+    crate::id::of_text(&format!("book:{name}"))
 }
 
 /// `today`, `3d`, or `-` when a book has no cards.
@@ -436,16 +462,28 @@ mod tests {
     }
 
     #[test]
-    fn the_index_shows_only_when_nothing_has_chosen_and_there_is_a_choice() {
-        let two = reg(Some("a"), &[("a", "/a"), ("b", "/b")]);
-        let one = reg(Some("a"), &[("a", "/a")]);
-        assert!(index_wanted(Some(&two), None, None, None));
-        assert!(!index_wanted(Some(&one), None, None, None));
-        assert!(!index_wanted(None, None, None, None));
-        assert!(!index_wanted(Some(&two), Some("b"), None, None));
-        assert!(!index_wanted(Some(&two), None, Some("b"), None));
-        assert!(index_wanted(Some(&two), None, Some(""), None));
-        assert!(!index_wanted(Some(&two), None, None, Some(Path::new("/h"))));
+    fn a_book_resolves_by_name_prefix_or_hash() {
+        let r = reg(Some("a"), &[("docket", "/a"), ("demo", "/b"), ("work", "/c")]);
+        assert_eq!(r.resolve("docket").unwrap(), "docket");
+        assert_eq!(r.resolve("wo").unwrap(), "work");
+        assert_eq!(r.resolve(&hash("demo")[..4]).unwrap(), "demo");
+        assert!(matches!(r.resolve("d"), Err(Error::Usage(_))), "docket and demo both start with d");
+        assert!(matches!(r.resolve("zz"), Err(Error::NoBook { .. })));
+    }
+
+    #[test]
+    fn a_book_hash_is_stable_and_eight_hex() {
+        assert_eq!(hash("docket"), hash("docket"));
+        assert_ne!(hash("docket"), hash("demo"));
+        assert_eq!(hash("docket").len(), 8);
+        assert!(crate::id::looks_like(&hash("docket")));
+    }
+
+    #[test]
+    fn choosing_a_book_accepts_its_hash() {
+        let r = reg(None, &[("docket", "/a"), ("demo", "/b")]);
+        let got = choose(Some(&r), Some(&hash("demo")[..5]), None, None).unwrap();
+        assert_eq!(got, Choice::Book { name: "demo".into(), path: "/b".into() });
     }
 
     #[test]
